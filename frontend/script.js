@@ -115,14 +115,21 @@ function addMessage(role, text, items) {
           ? `${Number(item.price_min).toLocaleString()}円〜${Number(item.price_max).toLocaleString()}円`
           : "";
 
+      const imageHtml = item.image_url
+        ? `<div class="item-image"><img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.name || "")}" onerror="this.parentElement.style.display='none'"></div>`
+        : "";
+
       card.innerHTML = `
-        <div class="item-name">${escapeHtml(item.name || "")}</div>
-        <div class="item-reasoning">${escapeHtml(item.reasoning || "")}</div>
-        ${priceText ? `<div class="item-price">${priceText}</div>` : ""}
-        ${item.tip ? `<div class="item-tip">${escapeHtml(item.tip)}</div>` : ""}
-        <div class="item-actions">
-          ${item.product_url ? `<a href="${escapeHtml(item.product_url)}" target="_blank" rel="noopener" class="item-link">商品を見る</a>` : ""}
-          ${item.search_keyword ? `<a href="https://www.google.com/search?q=${encodeURIComponent(item.search_keyword)}" target="_blank" rel="noopener" class="item-search">検索する</a>` : ""}
+        ${imageHtml}
+        <div class="item-body">
+          <div class="item-name">${escapeHtml(item.name || "")}</div>
+          <div class="item-reasoning">${escapeHtml(item.reasoning || "")}</div>
+          ${priceText ? `<div class="item-price">${priceText}</div>` : ""}
+          ${item.tip ? `<div class="item-tip">${escapeHtml(item.tip)}</div>` : ""}
+          <div class="item-actions">
+            ${item.product_url ? `<a href="${escapeHtml(item.product_url)}" target="_blank" rel="noopener" class="item-link">商品を見る</a>` : ""}
+            ${item.search_keyword ? `<a href="https://www.google.com/search?q=${encodeURIComponent(item.search_keyword)}" target="_blank" rel="noopener" class="item-search">検索する</a>` : ""}
+          </div>
         </div>
       `;
       cardsContainer.appendChild(card);
