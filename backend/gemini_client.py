@@ -218,8 +218,26 @@ async def chat(history: list[dict], user_message: str) -> dict:
 
                 result = parse_response(reply_text)
 
-                # ヒアリング中（商品提案なし）→ そのまま返す
+                # ヒアリング中（商品提案なし）
                 if not result["items"]:
+                    # 長文なのにITEMS JSONが無い → 提案を出したのにJSON形式を忘れている
+                    if len(reply_text) > 500 and verify_round < MAX_VERIFY_ROUNDS - 1:
+                        logger.warning(
+                            f"Long response ({len(reply_text)} chars) without <<<ITEMS>>> JSON. "
+                            "Requesting re-output with proper format."
+                        )
+                        loop_contents.append(
+                            types.Content(role="model", parts=[types.Part(text=reply_text)])
+                        )
+                        loop_contents.append(
+                            types.Content(role="user", parts=[types.Part(text=(
+                                "【システム】商品を提案する場合は、テキストの最後に必ず "
+                                "<<<ITEMS>>> と <<<END_ITEMS>>> で囲んだJSON配列を含めてください。"
+                                "JSONが無いと商品カードが表示されません。"
+                                "同じ提案内容で構いませんので、正しい形式で再出力してください。"
+                            ))])
+                        )
+                        continue
                     logger.info("No items in response (hearing phase)")
                     return {**result, "raw_reply": reply_text}
 
