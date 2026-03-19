@@ -33,6 +33,9 @@ ITEMS_PATTERN = re.compile(
     re.DOTALL,
 )
 
+# テキスト中のURL抽出用
+URL_IN_TEXT_PATTERN = re.compile(r'https?://[^\s<>"\')\]]+')
+
 OG_IMAGE_PATTERN = re.compile(
     r'<meta[^>]+(?:property|name)=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']'
     r'|<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\']og:image["\']',
@@ -228,7 +231,7 @@ def _verify_url_sync(url: str) -> dict:
             "final_url": final_url,
             "page_title": title[:200],
             "og_image_url": og_image,
-            "is_product_page": bool(title and status == 200),
+            "is_product_page": bool(status == 200),
             "price": price_info.get("price"),
             "high_price": price_info.get("high_price"),
             "currency": price_info.get("currency", ""),
@@ -301,12 +304,46 @@ async def _verify_and_enrich(items: list[dict]) -> list[dict]:
     return items
 
 
+def _inject_urls_from_text(items: list[dict], raw_text: str) -> list[dict]:
+    """
+    モデルのテキストからURLを正規表現で抽出し、URLが空のアイテムに注入する。
+    Google Search grounding 有効時、モデルはテキスト中に実URLを含むことがある。
+    抽出モデル(Phase 2)がこれを拾い損ねた場合のフォールバック。
+    """
+    urls = URL_IN_TEXT_PATTERN.findall(raw_text)
+    if not urls:
+        return items
+
+    # Google検索リダイレクトやGemini内部URLは除外
+    product_urls = [
+        u for u in urls
+        if not u.startswith("https://vertexaisearch.cloud.google.com")
+        and not u.startswith("https://www.google.com")
+        and "googleapis.com" not in u
+    ]
+
+    if not product_urls:
+        return items
+
+    logger.info(f"Found {len(product_urls)} URLs in raw text: {product_urls}")
+
+    # URLが空のアイテムに順番に割り当て
+    url_idx = 0
+    for item in items:
+        if not item.get("product_url") and url_idx < len(product_urls):
+            item["product_url"] = product_urls[url_idx]
+            logger.info(f"Injected URL for {item.get('name', '?')}: {product_urls[url_idx]}")
+            url_idx += 1
+
+    return items
+
+
 EXTRACTION_PROMPT = """以下のギフト提案テキストから商品情報を抽出し、JSON配列として出力してください。
 
 出力ルール:
 - <<<ITEMS>>> と <<<END_ITEMS>>> で囲む
 - 各商品について以下のフィールドを必ず含める
-- product_url はテキスト中に明示的なURLがある場合のみ使う。URLが無ければ空文字 "" にしろ。推測するな。
+- product_url はテキスト中に明示的なURL（https://...）がある場合、そのURLをそのまま使え。「【公式販売サイト】 https://...」形式で書かれたURLも含む。URLが見つからなければ空文字 "" にしろ。推測するな。
 - search_keyword はブランド名+商品名の日本語検索キーワード（必須）
 
 <<<ITEMS>>>
@@ -387,60 +424,105 @@ def _build_contents(history: list[dict], user_message: str) -> list[types.Conten
 
 async def chat(history: list[dict], user_message: str) -> dict:
     """
-    シングルパスフロー:
-    1. Google Search ON で生成
-    2. <<<ITEMS>>> があればそのまま検証へ
-    3. なければ別リクエスト(Search OFF)で抽出
-    4. URL検証 + OG画像/価格抽出（失敗してもアイテムは消さない）
+    検証・自己補正機能を含むフロー:
+    1. 生成
+    2. URL検証（_verify_and_enrich）
+    3. URLが無効な場合は、エラーメッセージを加えて再生成ループ（最大3回）
     """
-    contents = _build_contents(history, user_message)
+    base_contents = _build_contents(history, user_message)
 
     last_error = None
+    MAX_VALIDATION_RETRIES = 3
+
     for model_name in MODEL_CANDIDATES:
         try:
             logger.info(f"Trying model: {model_name}")
 
-            # Phase 1: Google Search ON で生成
             config = types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
-                temperature=0.8,
+                temperature=0.7,
                 tools=[GOOGLE_SEARCH_TOOL],
             )
 
-            response = await client.aio.models.generate_content(
-                model=model_name,
-                contents=contents,
-                config=config,
-            )
+            contents = list(base_contents)  # コピーして使う
 
-            try:
-                reply_text = response.text
-            except (AttributeError, ValueError):
-                reply_text = "申し訳ありません。問題が発生しました。もう一度お試しください。"
-                return {"reply": reply_text, "items": [], "raw_reply": reply_text}
+            for attempt in range(MAX_VALIDATION_RETRIES):
+                logger.info(f"--- Attempt {attempt + 1}/{MAX_VALIDATION_RETRIES} for {model_name} ---")
 
-            logger.info(f"Response (first 200): {reply_text[:200]}")
-
-            result = parse_response(reply_text)
-
-            # Phase 2: <<<ITEMS>>> がなく長文 → 抽出リクエスト（Search OFF）
-            if not result["items"] and len(reply_text) > 500:
-                logger.info(
-                    f"Long response ({len(reply_text)} chars) without <<<ITEMS>>>. "
-                    "Extracting items via separate request."
+                response = await client.aio.models.generate_content(
+                    model=model_name,
+                    contents=contents,
+                    config=config,
                 )
-                result["items"] = await _extract_items_from_text(reply_text, model_name)
 
-            # ヒアリング中（items なし）→ テキストのみ返す
-            if not result["items"]:
-                logger.info("No items (hearing phase)")
-                return {**result, "raw_reply": reply_text}
+                try:
+                    reply_text = response.text
+                except (AttributeError, ValueError):
+                    reply_text = "申し訳ありません。問題が発生しました。もう一度お試しください。"
+                    return {"reply": reply_text, "items": [], "raw_reply": reply_text}
 
-            # Phase 3: URL検証 + OG画像/価格抽出（アイテムは絶対に消さない）
-            logger.info(f"Verifying {len(result['items'])} items...")
-            result["items"] = await _verify_and_enrich(result["items"])
+                logger.info(f"Response (first 200): {reply_text[:200]}")
 
-            return {**result, "raw_reply": reply_text}
+                result = parse_response(reply_text)
+
+                # Phase 2: <<<ITEMS>>> がなく長文 → 抽出リクエスト（Search OFF）
+                if not result["items"] and len(reply_text) > 200:
+                    logger.info(
+                        f"Long response ({len(reply_text)} chars) without <<<ITEMS>>>. "
+                        "Extracting items via separate request."
+                    )
+                    result["items"] = await _extract_items_from_text(reply_text, model_name)
+
+                # ヒアリング中（items なし）→ テキストのみ返す
+                if not result["items"]:
+                    logger.info("No items (hearing phase)")
+                    return {**result, "raw_reply": reply_text}
+
+                # テキスト中のURLをアイテムに注入（抽出モデルが見逃した場合）
+                result["items"] = _inject_urls_from_text(result["items"], reply_text)
+
+                # Phase 3: URL検証 + OG画像/価格抽出
+                # ※ _verify_and_enrich はin-place修正するので、先にオリジナルURLを保存
+                orig_urls = [item.get("product_url", "") for item in result["items"]]
+
+                logger.info(f"Verifying {len(result['items'])} items...")
+                enriched_items = await _verify_and_enrich(result["items"])
+
+                # 確認: 元々URLがなかったのか、それとも検証で弾かれた（空にされた）のか
+                invalid_count = 0
+                error_msg = ""
+                for orig_url, enriched in zip(orig_urls, enriched_items):
+                    final_url = enriched.get("product_url", "")
+                    
+                    if not final_url:
+                        invalid_count += 1
+                        if not orig_url:
+                            error_msg = "システムエラー: 商品のURLが出力されていません。必ずGoogle検索で実際の公式販売ページ等を見つけ、そのURLを文章の最後に「【公式販売サイト】 https://...」のように記載してください。推測は厳禁です。\n"
+                        else:
+                            error_msg = f"システムエラー: 前回提案したURL ({orig_url}) はリンク切れかアクセス不可（404等）でした。別の実在する商品を探すか、正しいURLを見つけて、最初から提案し直してください。\n"
+                        
+                        error_msg += "【重要】ユーザーにはこのエラーを見せません。新しい文章の冒頭で絶対に謝罪したり、システムエラーについて言及したりしないでください。エラーなど無かったかのように、いきなり自然な商品提案の文章（導入部分）から書き始めてください。"
+
+                if invalid_count == 0:
+                    # 全て検証成功
+                    result["items"] = enriched_items
+                    return {**result, "raw_reply": reply_text}
+
+                if attempt < MAX_VALIDATION_RETRIES - 1:
+                    logger.warning(f"Found {invalid_count} invalid URLs. Retrying: {error_msg}")
+                    # ユーザーには見せず、システムからAIへ修正要求
+                    contents.append(types.Content(
+                        role="model",
+                        parts=[types.Part(text=reply_text)]
+                    ))
+                    contents.append(types.Content(
+                        role="user",
+                        parts=[types.Part(text=error_msg)]
+                    ))
+                else:
+                    logger.warning("Max validation retries reached. Returning gracefully.")
+                    result["items"] = enriched_items
+                    return {**result, "raw_reply": reply_text}
 
         except Exception as e:
             last_error = e
