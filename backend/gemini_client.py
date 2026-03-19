@@ -313,6 +313,65 @@ def _build_verification_feedback(
     return "\n".join(lines)
 
 
+EXTRACTION_PROMPT = """以下のギフト提案テキストから商品情報を抽出し、JSON配列として出力してください。
+
+出力ルール:
+- <<<ITEMS>>> と <<<END_ITEMS>>> で囲む
+- 各商品について以下のフィールドを必ず含める
+- product_url は提案テキストにURLがあればそれを使い、無ければブランド公式サイトのトップページURLを推測して入れる
+- search_keyword はブランド名+商品名の日本語検索キーワード
+
+<<<ITEMS>>>
+[
+  {
+    "id": 1,
+    "name": "正確な商品名",
+    "category": "カテゴリ",
+    "type": "タイプ",
+    "price_min": 数値,
+    "price_max": 数値,
+    "reasoning": "テキストから要約した理由1〜2文",
+    "tip": "ワンポイント1文",
+    "product_url": "商品またはブランドのURL",
+    "search_keyword": "ブランド名 商品名"
+  }
+]
+<<<END_ITEMS>>>
+
+テキストのみ出力。余計な説明は不要。
+
+提案テキスト:
+"""
+
+
+async def _extract_items_from_text(text: str, model_name: str) -> list[dict]:
+    """
+    Google Search なしの別リクエストで、提案テキストから <<<ITEMS>>> JSON を抽出する。
+    Google Search grounding が有効だとモデルがフォーマットに従わないため、
+    フォーマット専用の別リクエストを使う。
+    """
+    try:
+        response = await client.aio.models.generate_content(
+            model=model_name,
+            contents=[
+                types.Content(
+                    role="user",
+                    parts=[types.Part(text=EXTRACTION_PROMPT + text)],
+                )
+            ],
+            config=types.GenerateContentConfig(temperature=0.1),
+        )
+        extraction_text = response.text
+        logger.debug(f"Extraction response: {extraction_text[:500]}")
+        result = parse_response(extraction_text)
+        if result["items"]:
+            logger.info(f"Extracted {len(result['items'])} items from text")
+        return result["items"]
+    except Exception as e:
+        logger.error(f"Item extraction failed: {e}")
+        return []
+
+
 def _build_contents(history: list[dict], user_message: str) -> list[types.Content]:
     """会話履歴を新SDK形式に変換する"""
     contents = []
@@ -369,26 +428,23 @@ async def chat(history: list[dict], user_message: str) -> dict:
 
                 # ヒアリング中（商品提案なし）
                 if not result["items"]:
-                    # 長文なのにITEMS JSONが無い → 提案を出したのにJSON形式を忘れている
-                    if len(reply_text) > 500 and verify_round < MAX_VERIFY_ROUNDS - 1:
+                    # 長文なのに<<<ITEMS>>>が無い → Google Searchが構造化出力を妨げている
+                    # → Google Search なしの別リクエストでJSON抽出
+                    if len(reply_text) > 500:
                         logger.warning(
                             f"Long response ({len(reply_text)} chars) without <<<ITEMS>>> JSON. "
-                            "Requesting re-output with proper format."
+                            "Extracting items via separate non-search request."
                         )
-                        loop_contents.append(
-                            types.Content(role="model", parts=[types.Part(text=reply_text)])
-                        )
-                        loop_contents.append(
-                            types.Content(role="user", parts=[types.Part(text=(
-                                "【システム】商品を提案する場合は、テキストの最後に必ず "
-                                "<<<ITEMS>>> と <<<END_ITEMS>>> で囲んだJSON配列を含めてください。"
-                                "JSONが無いと商品カードが表示されません。"
-                                "同じ提案内容で構いませんので、正しい形式で再出力してください。"
-                            ))])
-                        )
-                        continue
-                    logger.info("No items in response (hearing phase)")
-                    return {**result, "raw_reply": reply_text}
+                        extracted = await _extract_items_from_text(reply_text, model_name)
+                        if extracted:
+                            result["items"] = extracted
+                            # 抽出成功 → URL検証フローへ進む（下の検証ブロックへ）
+                        else:
+                            logger.info("Extraction returned no items, returning as hearing phase")
+                            return {**result, "raw_reply": reply_text}
+                    else:
+                        logger.info("No items in response (hearing phase)")
+                        return {**result, "raw_reply": reply_text}
 
                 # ── 商品URLをサーバー側で検証（価格も抽出） ──
                 logger.info(f"Verifying {len(result['items'])} item URLs...")
