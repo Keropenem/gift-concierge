@@ -41,6 +41,24 @@ OG_IMAGE_PATTERN = re.compile(
 
 TITLE_PATTERN = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 
+# 価格抽出用パターン
+PRICE_META_PATTERN = re.compile(
+    r'<meta[^>]+(?:property|name)=["\'](?:product:price:amount|og:price:amount)["\'][^>]+content=["\']([^"\']+)["\']'
+    r'|<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\'](?:product:price:amount|og:price:amount)["\']',
+    re.IGNORECASE,
+)
+
+CURRENCY_META_PATTERN = re.compile(
+    r'<meta[^>]+(?:property|name)=["\'](?:product:price:currency|og:price:currency)["\'][^>]+content=["\']([^"\']+)["\']'
+    r'|<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\'](?:product:price:currency|og:price:currency)["\']',
+    re.IGNORECASE,
+)
+
+JSON_LD_PATTERN = re.compile(
+    r"<script[^>]+type=[\"']application/ld\+json[\"'][^>]*>(.*?)</script>",
+    re.DOTALL | re.IGNORECASE,
+)
+
 
 def parse_response(text: str) -> dict:
     """AIの返答からテキストとITEMS JSONを分離する"""
@@ -62,10 +80,105 @@ def parse_response(text: str) -> dict:
     return {"reply": text.strip(), "items": []}
 
 
+# ── 価格抽出 ──
+
+def _extract_price_from_jsonld(data) -> dict:
+    """JSON-LD構造化データからProduct価格を抽出する"""
+    if isinstance(data, list):
+        for item in data:
+            result = _extract_price_from_jsonld(item)
+            if result:
+                return result
+        return {}
+
+    if not isinstance(data, dict):
+        return {}
+
+    # @graph 配列を展開
+    if data.get("@graph"):
+        return _extract_price_from_jsonld(data["@graph"])
+
+    # Product型を探す
+    dtype = data.get("@type", "")
+    if isinstance(dtype, list):
+        dtype = dtype[0] if dtype else ""
+    if dtype not in ("Product", "IndividualProduct"):
+        return {}
+
+    offers = data.get("offers", {})
+    if isinstance(offers, list):
+        offers = offers[0] if offers else {}
+    # AggregateOffer の場合
+    if isinstance(offers, dict) and offers.get("@type") == "AggregateOffer":
+        low = offers.get("lowPrice")
+        high = offers.get("highPrice")
+        currency = offers.get("priceCurrency", "")
+        if low is not None:
+            try:
+                result = {
+                    "price": float(str(low).replace(",", "")),
+                    "currency": currency,
+                }
+                if high is not None:
+                    result["high_price"] = float(str(high).replace(",", ""))
+                return result
+            except ValueError:
+                pass
+
+    price = offers.get("price") or offers.get("lowPrice")
+    currency = offers.get("priceCurrency", "")
+
+    if price is not None:
+        try:
+            result = {
+                "price": float(str(price).replace(",", "")),
+                "currency": currency,
+            }
+            high = offers.get("highPrice")
+            if high is not None:
+                result["high_price"] = float(str(high).replace(",", ""))
+            return result
+        except ValueError:
+            pass
+
+    return {}
+
+
+def _extract_price_from_html(html: str) -> dict:
+    """HTMLから価格情報を抽出する（JSON-LD → metaタグの優先順）"""
+    # 1. JSON-LD structured data
+    for match in JSON_LD_PATTERN.finditer(html):
+        try:
+            data = json.loads(match.group(1))
+            price_info = _extract_price_from_jsonld(data)
+            if price_info:
+                logger.debug(f"Price from JSON-LD: {price_info}")
+                return price_info
+        except json.JSONDecodeError:
+            continue
+
+    # 2. product:price:amount / og:price:amount meta tags
+    price_match = PRICE_META_PATTERN.search(html)
+    if price_match:
+        price_str = price_match.group(1) or price_match.group(2)
+        try:
+            price = float(price_str.replace(",", ""))
+            currency = ""
+            currency_match = CURRENCY_META_PATTERN.search(html)
+            if currency_match:
+                currency = currency_match.group(1) or currency_match.group(2)
+            logger.debug(f"Price from meta: {price} {currency}")
+            return {"price": price, "currency": currency}
+        except ValueError:
+            pass
+
+    return {}
+
+
 # ── URL検証（サーバー側で実行） ──
 
 def _verify_url_sync(url: str) -> dict:
-    """URLにアクセスして検証結果を返す（同期）"""
+    """URLにアクセスして検証結果を返す（同期）。価格・OG画像も抽出する。"""
     try:
         req = Request(url, headers={
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -73,13 +186,16 @@ def _verify_url_sync(url: str) -> dict:
         with urlopen(req, timeout=8) as resp:
             status = resp.status
             final_url = resp.url
-            html = resp.read(50000).decode("utf-8", errors="ignore")
+            html = resp.read(100000).decode("utf-8", errors="ignore")
 
         title_match = TITLE_PATTERN.search(html)
         title = title_match.group(1).strip() if title_match else ""
 
         og_match = OG_IMAGE_PATTERN.search(html)
         og_image = (og_match.group(1) or og_match.group(2)) if og_match else ""
+
+        # 価格抽出
+        price_info = _extract_price_from_html(html)
 
         return {
             "accessible": True,
@@ -88,6 +204,9 @@ def _verify_url_sync(url: str) -> dict:
             "page_title": title[:200],
             "og_image_url": og_image,
             "is_product_page": bool(title and status == 200),
+            "price": price_info.get("price"),
+            "high_price": price_info.get("high_price"),
+            "currency": price_info.get("currency", ""),
         }
     except Exception as e:
         return {
@@ -103,7 +222,10 @@ async def verify_product_url(url: str) -> dict:
 
 
 async def _verify_items(items: list[dict]) -> tuple[list[dict], list[tuple[dict, dict]]]:
-    """全商品URLを並行検証し、有効/無効に分類。有効分にはOG画像もセットする。"""
+    """
+    全商品URLを並行検証し、有効/無効に分類。
+    有効分にはOG画像と実際の価格をセットする。
+    """
     verified = []
     invalid = []
 
@@ -113,7 +235,6 @@ async def _verify_items(items: list[dict]) -> tuple[list[dict], list[tuple[dict,
         if url and url.startswith("http"):
             tasks.append(verify_product_url(url))
         else:
-            # URL無し → 非同期で即座に無効結果を返す
             async def _no_url():
                 return {"accessible": False, "error": "URLが指定されていません"}
             tasks.append(_no_url())
@@ -124,10 +245,26 @@ async def _verify_items(items: list[dict]) -> tuple[list[dict], list[tuple[dict,
         if isinstance(result, Exception):
             invalid.append((item, {"accessible": False, "error": str(result)[:200]}))
         elif result.get("accessible") and result.get("is_product_page"):
-            # 検証OK → OG画像があればセット
+            # OG画像
             og = result.get("og_image_url")
             if og:
                 item["image_url"] = og
+
+            # 実際の価格で上書き
+            actual_price = result.get("price")
+            if actual_price:
+                item["actual_price"] = actual_price
+                item["actual_high_price"] = result.get("high_price")
+                item["actual_currency"] = result.get("currency", "")
+                # price_min/price_max を実価格で上書き
+                item["price_min"] = int(actual_price)
+                item["price_max"] = int(result.get("high_price") or actual_price)
+                logger.info(
+                    f"Price update for {item.get('name', '?')}: "
+                    f"{actual_price} {result.get('currency', '')} "
+                    f"(model said {item.get('price_min')}〜{item.get('price_max')})"
+                )
+
             verified.append(item)
         else:
             invalid.append((item, result))
@@ -139,28 +276,40 @@ def _build_verification_feedback(
     invalid_items: list[tuple[dict, dict]],
     verified_items: list[dict],
 ) -> str:
-    """無効URL情報をモデルへのフィードバックメッセージに変換する"""
-    lines = [
-        "【システム検証結果】以下の商品URLにアクセスできなかったか、商品ページではありませんでした。",
-        "",
-    ]
-    for item, result in invalid_items:
-        name = item.get("name", "不明")
-        url = item.get("product_url", "なし")
-        error = result.get("error", result.get("page_title", "ページが見つかりません"))
-        lines.append(f"- {name}: {url} → {error}")
+    """無効URL + 価格ズレ情報をモデルへのフィードバックメッセージに変換する"""
+    lines = []
+
+    if invalid_items:
+        lines.append(
+            "【システム検証結果】以下の商品URLにアクセスできなかったか、商品ページではありませんでした。"
+        )
+        lines.append("")
+        for item, result in invalid_items:
+            name = item.get("name", "不明")
+            url = item.get("product_url", "なし")
+            error = result.get("error", result.get("page_title", "ページが見つかりません"))
+            lines.append(f"- {name}: {url} → {error}")
 
     if verified_items:
         lines.append("")
         lines.append(f"以下の{len(verified_items)}件は有効でした（そのまま保持してください）:")
         for item in verified_items:
-            lines.append(f"- {item.get('name', '')}")
+            name = item.get("name", "")
+            actual = item.get("actual_price")
+            currency = item.get("actual_currency", "")
+            if actual:
+                lines.append(f"- {name}（実際の価格: {actual} {currency}）")
+            else:
+                lines.append(f"- {name}")
 
-    lines.append("")
-    lines.append(
-        "無効だった商品の代わりに、実在する別の商品を検索し直して提案してください。"
-        "URLは実際にアクセスできるものだけ使ってください。"
-    )
+    if invalid_items:
+        lines.append("")
+        lines.append(
+            "無効だった商品の代わりに、実在する別の商品を検索し直して提案してください。"
+            "URLは実際にアクセスできるものだけ使ってください。"
+            "価格は商品ページに記載されている実際の価格を使ってください。"
+        )
+
     return "\n".join(lines)
 
 
@@ -181,8 +330,8 @@ def _build_contents(history: list[dict], user_message: str) -> list[types.Conten
 
 async def chat(history: list[dict], user_message: str) -> dict:
     """
-    会話 → 提案があればURLをサーバー側で検証 → 無効なら再提案を依頼するループ。
-    Google Search grounding で商品検索し、後検証で存在確認する。
+    会話 → 提案があればURLをサーバー側で検証（価格含む） → 無効なら再提案を依頼するループ。
+    Google Search grounding で商品検索し、後検証で存在・価格を確認する。
     """
     contents = _build_contents(history, user_message)
 
@@ -241,7 +390,7 @@ async def chat(history: list[dict], user_message: str) -> dict:
                     logger.info("No items in response (hearing phase)")
                     return {**result, "raw_reply": reply_text}
 
-                # ── 商品URLをサーバー側で検証 ──
+                # ── 商品URLをサーバー側で検証（価格も抽出） ──
                 logger.info(f"Verifying {len(result['items'])} item URLs...")
                 verified, invalid = await _verify_items(result["items"])
 
@@ -250,7 +399,7 @@ async def chat(history: list[dict], user_message: str) -> dict:
                 )
 
                 if not invalid:
-                    # 全URL有効 → 返す
+                    # 全URL有効 → 返す（価格は実価格で上書き済み）
                     result["items"] = verified
                     return {**result, "raw_reply": reply_text}
 

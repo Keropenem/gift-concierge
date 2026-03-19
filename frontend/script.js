@@ -110,10 +110,7 @@ function addMessage(role, text, items) {
       const card = document.createElement("div");
       card.className = "item-card";
 
-      const priceText =
-        item.price_min && item.price_max
-          ? `${Number(item.price_min).toLocaleString()}円〜${Number(item.price_max).toLocaleString()}円`
-          : "";
+      const priceText = formatPrice(item);
 
       const imageHtml = item.image_url
         ? `<div class="item-image"><img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.name || "")}" onerror="this.parentElement.style.display='none'"></div>`
@@ -157,4 +154,25 @@ function escapeHtml(text) {
   const div = document.createElement("div");
   div.textContent = text;
   return div.innerHTML;
+}
+
+function formatPrice(item) {
+  const min = item.price_min;
+  const max = item.price_max;
+  if (!min) return "";
+
+  const currency = (item.actual_currency || "").toUpperCase();
+  // 通貨記号マッピング
+  const symbols = { JPY: "¥", USD: "$", AUD: "A$", EUR: "€", GBP: "£", KRW: "₩", CNY: "¥" };
+  const sym = symbols[currency] || (currency ? currency + " " : "¥");
+  const isYen = !currency || currency === "JPY";
+
+  const fmtNum = (n) => Number(n).toLocaleString();
+
+  if (min === max || !max) {
+    return isYen ? `${fmtNum(min)}円` : `${sym}${fmtNum(min)}`;
+  }
+  return isYen
+    ? `${fmtNum(min)}円〜${fmtNum(max)}円`
+    : `${sym}${fmtNum(min)}〜${sym}${fmtNum(max)}`;
 }
