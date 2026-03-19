@@ -118,6 +118,12 @@ Step D: URLを推測で構成するな
 - 検索結果に実際に返ってきたURLだけを使え。
 - 推測で商品名を作るな。
 
+Step E: verify_product_url ツールで最終検証（必須）
+- 提案に含める全URLについて verify_product_url を呼び出せ。
+- accessible: false → そのURLは無効。別の商品を探せ（Step Aに戻る）。
+- is_product_page: false → 商品ページでない可能性。別のURLを試せ。
+- 検証に合格したURLのみを product_url に入れろ。検証していないURLは絶対に出すな。
+
 product_urlは購入国のサイト。search_keywordはユーザーの会話言語。この2つは別軸。
 例: 日本語で「オーストラリア土産」の相談 → product_urlは.com.au、search_keywordは日本語。
 
