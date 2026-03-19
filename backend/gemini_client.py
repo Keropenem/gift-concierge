@@ -60,6 +60,31 @@ JSON_LD_PATTERN = re.compile(
 )
 
 
+def _try_parse_json_array(text: str) -> list[dict]:
+    """テキストからJSON配列を抽出する（<<<ITEMS>>>デリミタなしのフォールバック）"""
+    # ```json ... ``` ブロックを探す
+    code_block = re.search(r"```(?:json)?\s*(\[.*?\])\s*```", text, re.DOTALL)
+    if code_block:
+        try:
+            items = json.loads(code_block.group(1))
+            if isinstance(items, list) and items:
+                return items
+        except json.JSONDecodeError:
+            pass
+
+    # 素の JSON 配列 [ ... ] を探す
+    bracket = re.search(r"\[\s*\{.*?\}\s*\]", text, re.DOTALL)
+    if bracket:
+        try:
+            items = json.loads(bracket.group(0))
+            if isinstance(items, list) and items:
+                return items
+        except json.JSONDecodeError:
+            pass
+
+    return []
+
+
 def parse_response(text: str) -> dict:
     """AIの返答からテキストとITEMS JSONを分離する"""
     match = ITEMS_PATTERN.search(text)
@@ -310,8 +335,7 @@ EXTRACTION_PROMPT = """以下のギフト提案テキストから商品情報を
 async def _extract_items_from_text(text: str, model_name: str) -> list[dict]:
     """
     Google Search なしの別リクエストで、提案テキストから <<<ITEMS>>> JSON を抽出する。
-    Google Search grounding が有効だとモデルがフォーマットに従わないため、
-    フォーマット専用の別リクエストを使う。
+    <<<ITEMS>>>デリミタが無い場合もJSON配列を直接パースするフォールバックあり。
     """
     try:
         response = await client.aio.models.generate_content(
@@ -325,11 +349,22 @@ async def _extract_items_from_text(text: str, model_name: str) -> list[dict]:
             config=types.GenerateContentConfig(temperature=0.1),
         )
         extraction_text = response.text
-        logger.debug(f"Extraction response: {extraction_text[:500]}")
+        logger.info(f"Extraction response (first 300): {extraction_text[:300]}")
+
+        # まず <<<ITEMS>>> デリミタで試す
         result = parse_response(extraction_text)
         if result["items"]:
-            logger.info(f"Extracted {len(result['items'])} items from text")
-        return result["items"]
+            logger.info(f"Extracted {len(result['items'])} items via delimiter")
+            return result["items"]
+
+        # フォールバック: デリミタなしの JSON 配列を直接パース
+        items = _try_parse_json_array(extraction_text)
+        if items:
+            logger.info(f"Extracted {len(items)} items via JSON fallback")
+            return items
+
+        logger.warning("Extraction returned no parseable items")
+        return []
     except Exception as e:
         logger.error(f"Item extraction failed: {e}")
         return []
