@@ -223,9 +223,9 @@ async def chat(history: list[dict], user_message: str) -> dict:
             try:
                 tool_names = []
                 for t in tools:
-                    if t.google_search:
+                    if getattr(t, "google_search", None):
                         tool_names.append("GoogleSearch")
-                    if t.function_declarations:
+                    if getattr(t, "function_declarations", None):
                         tool_names.append("FunctionCalling")
                 logger.info(f"Trying model: {model_name}, tools: {tool_names}")
 
@@ -248,7 +248,7 @@ async def chat(history: list[dict], user_message: str) -> dict:
                     )
 
                     candidate = response.candidates[0]
-                    parts = candidate.content.parts
+                    parts = candidate.content.parts if candidate.content and candidate.content.parts else []
                     function_calls = [p for p in parts if p.function_call]
 
                     if not function_calls:
