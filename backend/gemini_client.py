@@ -3,7 +3,6 @@ import json
 import logging
 import os
 import re
-from typing import Optional
 from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
@@ -22,35 +21,12 @@ logger.info(f"API key loaded: {'Yes' if api_key else 'No'}")
 
 client = genai.Client(api_key=api_key)
 
-# 会話: Gemini 3系優先
 MODEL_CANDIDATES = [
     "gemini-3-flash-preview",
     "gemini-2.5-flash",
 ]
 
 GOOGLE_SEARCH_TOOL = types.Tool(google_search=types.GoogleSearch())
-
-# ── Function Calling: 商品URL検証ツール ──
-VERIFY_URL_DECL = types.FunctionDeclaration(
-    name="verify_product_url",
-    description=(
-        "商品URLにアクセスし、ページが実在するか検証する。"
-        "HTTPステータス、ページタイトル、OG画像URLを返す。"
-        "商品を提案する前に必ずこのツールでURLの存在を確認すること。"
-    ),
-    parameters=types.Schema(
-        type=types.Type.OBJECT,
-        properties={
-            "url": types.Schema(
-                type=types.Type.STRING,
-                description="検証する商品ページのURL",
-            ),
-        },
-        required=["url"],
-    ),
-)
-
-FUNCTION_TOOL = types.Tool(function_declarations=[VERIFY_URL_DECL])
 
 ITEMS_PATTERN = re.compile(
     r"<<<ITEMS>>>\s*(.*?)\s*<<<END_ITEMS>>>",
@@ -86,7 +62,7 @@ def parse_response(text: str) -> dict:
     return {"reply": text.strip(), "items": []}
 
 
-# ── URL検証関数（Function Callingから呼ばれる） ──
+# ── URL検証（サーバー側で実行） ──
 
 def _verify_url_sync(url: str) -> dict:
     """URLにアクセスして検証結果を返す（同期）"""
@@ -126,70 +102,66 @@ async def verify_product_url(url: str) -> dict:
     return await asyncio.to_thread(_verify_url_sync, url)
 
 
-# Function Call ディスパッチャ
-FUNCTION_HANDLERS = {
-    "verify_product_url": verify_product_url,
-}
-
-
-async def _execute_function_call(fc) -> dict:
-    """Function Callを実行して結果を返す"""
-    handler = FUNCTION_HANDLERS.get(fc.name)
-    if not handler:
-        return {"error": f"Unknown function: {fc.name}"}
-    try:
-        args = dict(fc.args) if fc.args else {}
-        return await handler(**args)
-    except Exception as e:
-        logger.error(f"Function {fc.name} error: {e}")
-        return {"error": str(e)[:200]}
-
-
-# ── OG画像取得（フォールバック用） ──
-
-def _fetch_og_image_sync(url: str) -> Optional[str]:
-    """URLからOG画像URLを取得する（同期）"""
-    try:
-        req = Request(url, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        })
-        with urlopen(req, timeout=5) as resp:
-            html = resp.read(50000).decode("utf-8", errors="ignore")
-        match = OG_IMAGE_PATTERN.search(html)
-        if match:
-            return match.group(1) or match.group(2)
-    except Exception as e:
-        logger.debug(f"OG image fetch failed for {url}: {e}")
-    return None
-
-
-async def fetch_og_image(url: str) -> Optional[str]:
-    """URLからOG画像URLを取得する（非同期）"""
-    return await asyncio.to_thread(_fetch_og_image_sync, url)
-
-
-async def enrich_items_with_images(items: list[dict]) -> list[dict]:
-    """各商品アイテムにOG画像URLを追加する（未取得分のみ）"""
-    if not items:
-        return items
+async def _verify_items(items: list[dict]) -> tuple[list[dict], list[tuple[dict, dict]]]:
+    """全商品URLを並行検証し、有効/無効に分類。有効分にはOG画像もセットする。"""
+    verified = []
+    invalid = []
 
     tasks = []
     for item in items:
         url = item.get("product_url", "")
-        if url and url.startswith("http") and not item.get("image_url"):
-            tasks.append(fetch_og_image(url))
+        if url and url.startswith("http"):
+            tasks.append(verify_product_url(url))
         else:
-            tasks.append(asyncio.sleep(0))  # placeholder
+            # URL無し → 非同期で即座に無効結果を返す
+            async def _no_url():
+                return {"accessible": False, "error": "URLが指定されていません"}
+            tasks.append(_no_url())
 
-    images = await asyncio.gather(*tasks, return_exceptions=True)
+    results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    for item, img in zip(items, images):
-        if isinstance(img, str):
-            item["image_url"] = img
-        elif not item.get("image_url"):
-            item["image_url"] = None
+    for item, result in zip(items, results):
+        if isinstance(result, Exception):
+            invalid.append((item, {"accessible": False, "error": str(result)[:200]}))
+        elif result.get("accessible") and result.get("is_product_page"):
+            # 検証OK → OG画像があればセット
+            og = result.get("og_image_url")
+            if og:
+                item["image_url"] = og
+            verified.append(item)
+        else:
+            invalid.append((item, result))
 
-    return items
+    return verified, invalid
+
+
+def _build_verification_feedback(
+    invalid_items: list[tuple[dict, dict]],
+    verified_items: list[dict],
+) -> str:
+    """無効URL情報をモデルへのフィードバックメッセージに変換する"""
+    lines = [
+        "【システム検証結果】以下の商品URLにアクセスできなかったか、商品ページではありませんでした。",
+        "",
+    ]
+    for item, result in invalid_items:
+        name = item.get("name", "不明")
+        url = item.get("product_url", "なし")
+        error = result.get("error", result.get("page_title", "ページが見つかりません"))
+        lines.append(f"- {name}: {url} → {error}")
+
+    if verified_items:
+        lines.append("")
+        lines.append(f"以下の{len(verified_items)}件は有効でした（そのまま保持してください）:")
+        for item in verified_items:
+            lines.append(f"- {item.get('name', '')}")
+
+    lines.append("")
+    lines.append(
+        "無効だった商品の代わりに、実在する別の商品を検索し直して提案してください。"
+        "URLは実際にアクセスできるものだけ使ってください。"
+    )
+    return "\n".join(lines)
 
 
 def _build_contents(history: list[dict], user_message: str) -> list[types.Content]:
@@ -208,120 +180,91 @@ def _build_contents(history: list[dict], user_message: str) -> list[types.Conten
 
 
 async def chat(history: list[dict], user_message: str) -> dict:
-    """会話履歴を使ってGeminiとマルチターン対話する（Function Calling + Google Search grounding）"""
+    """
+    会話 → 提案があればURLをサーバー側で検証 → 無効なら再提案を依頼するループ。
+    Google Search grounding で商品検索し、後検証で存在確認する。
+    """
     contents = _build_contents(history, user_message)
 
     last_error = None
     for model_name in MODEL_CANDIDATES:
-        # Google Search + Function Calling を試し、互換性エラーなら Function Calling のみにフォールバック
-        tool_configs = [
-            [GOOGLE_SEARCH_TOOL, FUNCTION_TOOL],
-            [FUNCTION_TOOL],
-        ]
+        try:
+            logger.info(f"Trying model: {model_name}")
 
-        for tools in tool_configs:
-            try:
-                tool_names = []
-                for t in tools:
-                    if getattr(t, "google_search", None):
-                        tool_names.append("GoogleSearch")
-                    if getattr(t, "function_declarations", None):
-                        tool_names.append("FunctionCalling")
-                logger.info(f"Trying model: {model_name}, tools: {tool_names}")
+            config = types.GenerateContentConfig(
+                system_instruction=SYSTEM_PROMPT,
+                temperature=0.8,
+                tools=[GOOGLE_SEARCH_TOOL],
+            )
 
-                config = types.GenerateContentConfig(
-                    system_instruction=SYSTEM_PROMPT,
-                    temperature=0.8,
-                    tools=tools,
+            loop_contents = list(contents)
+            MAX_VERIFY_ROUNDS = 3
+            reply_text = ""
+
+            for verify_round in range(MAX_VERIFY_ROUNDS):
+                response = await client.aio.models.generate_content(
+                    model=model_name,
+                    contents=loop_contents,
+                    config=config,
                 )
 
-                # ── エージェントループ ──
-                loop_contents = list(contents)
-                MAX_ROUNDS = 10
-                response = None
-
-                for round_num in range(MAX_ROUNDS):
-                    response = await client.aio.models.generate_content(
-                        model=model_name,
-                        contents=loop_contents,
-                        config=config,
-                    )
-
-                    candidate = response.candidates[0]
-                    parts = candidate.content.parts if candidate.content and candidate.content.parts else []
-                    function_calls = [p for p in parts if p.function_call]
-
-                    if not function_calls:
-                        break  # テキスト応答 → ループ終了
-
-                    logger.info(
-                        f"[Round {round_num + 1}] Function calls: "
-                        f"{[p.function_call.name for p in function_calls]}"
-                    )
-
-                    # モデルの応答を contents に追加
-                    loop_contents.append(candidate.content)
-
-                    # 各 Function Call を並行実行
-                    fc_tasks = []
-                    for part in function_calls:
-                        fc = part.function_call
-                        logger.info(f"Executing: {fc.name}({fc.args})")
-                        fc_tasks.append(_execute_function_call(fc))
-
-                    fc_results = await asyncio.gather(*fc_tasks)
-
-                    # Function Response を user role で追加
-                    fc_response_parts = []
-                    for part, result in zip(function_calls, fc_results):
-                        logger.info(
-                            f"Result for {part.function_call.name}: "
-                            f"{json.dumps(result, ensure_ascii=False)[:300]}"
-                        )
-                        fc_response_parts.append(types.Part(
-                            function_response=types.FunctionResponse(
-                                name=part.function_call.name,
-                                response=result,
-                            )
-                        ))
-
-                    loop_contents.append(
-                        types.Content(role="user", parts=fc_response_parts)
-                    )
-
-                # 最終応答のテキストを取得
                 try:
                     reply_text = response.text
                 except (AttributeError, ValueError):
-                    logger.warning("No text in final response")
-                    reply_text = "申し訳ありません。商品の検証中に問題が発生しました。もう一度お試しください。"
+                    reply_text = "申し訳ありません。問題が発生しました。もう一度お試しください。"
+                    break
 
-                logger.info(f"Success with model: {model_name}")
-                logger.debug(f"Response (first 300): {reply_text[:300]}")
+                logger.info(f"[Round {verify_round + 1}] Response (first 200): {reply_text[:200]}")
 
                 result = parse_response(reply_text)
 
-                # 商品アイテムがあればOG画像を取得（まだ無い分のみ）
-                if result["items"]:
-                    result["items"] = await enrich_items_with_images(result["items"])
+                # ヒアリング中（商品提案なし）→ そのまま返す
+                if not result["items"]:
+                    logger.info("No items in response (hearing phase)")
+                    return {**result, "raw_reply": reply_text}
 
-                return {
-                    **result,
-                    "raw_reply": reply_text,
-                }
+                # ── 商品URLをサーバー側で検証 ──
+                logger.info(f"Verifying {len(result['items'])} item URLs...")
+                verified, invalid = await _verify_items(result["items"])
 
-            except Exception as e:
-                last_error = e
-                error_msg = str(e).lower()
-                logger.warning(
-                    f"Model {model_name} failed: {type(e).__name__}: {e}"
+                logger.info(
+                    f"Verification: {len(verified)} valid, {len(invalid)} invalid"
                 )
-                # Google Search + Function Calling の互換性エラー → Function Calling のみへ
-                if "google_search" in error_msg or "incompatible" in error_msg:
-                    logger.info("Falling back to Function Calling only")
-                    continue
+
+                if not invalid:
+                    # 全URL有効 → 返す
+                    result["items"] = verified
+                    return {**result, "raw_reply": reply_text}
+
+                if verify_round < MAX_VERIFY_ROUNDS - 1:
+                    # 無効URLあり → モデルにフィードバックして再提案
+                    feedback = _build_verification_feedback(invalid, verified)
+                    logger.info(f"Sending verification feedback to model:\n{feedback}")
+
+                    loop_contents.append(
+                        types.Content(role="model", parts=[types.Part(text=reply_text)])
+                    )
+                    loop_contents.append(
+                        types.Content(role="user", parts=[types.Part(text=feedback)])
+                    )
                 else:
-                    break  # 他のエラーは次のモデルへ
+                    # 最終ラウンド → 有効な商品のみ返す
+                    logger.warning(
+                        f"Max verification rounds reached. "
+                        f"Returning {len(verified)} valid items, "
+                        f"dropping {len(invalid)} invalid."
+                    )
+                    result["items"] = verified
+                    return {**result, "raw_reply": reply_text}
+
+            # ループ正常終了（items無しで抜けた場合）
+            result = parse_response(reply_text)
+            return {**result, "raw_reply": reply_text}
+
+        except Exception as e:
+            last_error = e
+            logger.warning(f"Model {model_name} failed: {type(e).__name__}: {e}")
+            continue
 
     logger.error(f"All models failed. Last error: {last_error}")
     raise last_error
