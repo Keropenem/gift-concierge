@@ -221,30 +221,33 @@ async def verify_product_url(url: str) -> dict:
     return await asyncio.to_thread(_verify_url_sync, url)
 
 
-async def _verify_items(items: list[dict]) -> tuple[list[dict], list[tuple[dict, dict]]]:
+async def _verify_and_enrich(items: list[dict]) -> list[dict]:
     """
-    全商品URLを並行検証し、有効/無効に分類。
-    有効分にはOG画像と実際の価格をセットする。
+    全商品URLを並行検証し、OG画像と実価格をセットする。
+    検証失敗でもアイテムは消さない（product_urlを空にするだけ）。
+    search_keyword が残るので「検索する」ボタンは常に表示される。
     """
-    verified = []
-    invalid = []
-
     tasks = []
-    for item in items:
+    has_url = []
+    for i, item in enumerate(items):
         url = item.get("product_url", "")
         if url and url.startswith("http"):
             tasks.append(verify_product_url(url))
-        else:
-            async def _no_url():
-                return {"accessible": False, "error": "URLが指定されていません"}
-            tasks.append(_no_url())
+            has_url.append(i)
+
+    if not tasks:
+        return items
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    for item, result in zip(items, results):
+    for idx, result in zip(has_url, results):
+        item = items[idx]
         if isinstance(result, Exception):
-            invalid.append((item, {"accessible": False, "error": str(result)[:200]}))
-        elif result.get("accessible") and result.get("is_product_page"):
+            logger.warning(f"URL verification error for {item.get('name', '?')}: {result}")
+            item["product_url"] = ""
+            continue
+
+        if result.get("accessible") and result.get("is_product_page"):
             # OG画像
             og = result.get("og_image_url")
             if og:
@@ -256,61 +259,21 @@ async def _verify_items(items: list[dict]) -> tuple[list[dict], list[tuple[dict,
                 item["actual_price"] = actual_price
                 item["actual_high_price"] = result.get("high_price")
                 item["actual_currency"] = result.get("currency", "")
-                # price_min/price_max を実価格で上書き
                 item["price_min"] = int(actual_price)
                 item["price_max"] = int(result.get("high_price") or actual_price)
                 logger.info(
                     f"Price update for {item.get('name', '?')}: "
-                    f"{actual_price} {result.get('currency', '')} "
-                    f"(model said {item.get('price_min')}〜{item.get('price_max')})"
+                    f"{actual_price} {result.get('currency', '')}"
                 )
-
-            verified.append(item)
         else:
-            invalid.append((item, result))
+            # 検証NG → URLだけ消す（アイテム自体は残す）
+            logger.info(
+                f"Invalid URL for {item.get('name', '?')}: "
+                f"{item.get('product_url', '')} → clearing URL"
+            )
+            item["product_url"] = ""
 
-    return verified, invalid
-
-
-def _build_verification_feedback(
-    invalid_items: list[tuple[dict, dict]],
-    verified_items: list[dict],
-) -> str:
-    """無効URL + 価格ズレ情報をモデルへのフィードバックメッセージに変換する"""
-    lines = []
-
-    if invalid_items:
-        lines.append(
-            "【システム検証結果】以下の商品URLにアクセスできなかったか、商品ページではありませんでした。"
-        )
-        lines.append("")
-        for item, result in invalid_items:
-            name = item.get("name", "不明")
-            url = item.get("product_url", "なし")
-            error = result.get("error", result.get("page_title", "ページが見つかりません"))
-            lines.append(f"- {name}: {url} → {error}")
-
-    if verified_items:
-        lines.append("")
-        lines.append(f"以下の{len(verified_items)}件は有効でした（そのまま保持してください）:")
-        for item in verified_items:
-            name = item.get("name", "")
-            actual = item.get("actual_price")
-            currency = item.get("actual_currency", "")
-            if actual:
-                lines.append(f"- {name}（実際の価格: {actual} {currency}）")
-            else:
-                lines.append(f"- {name}")
-
-    if invalid_items:
-        lines.append("")
-        lines.append(
-            "無効だった商品の代わりに、実在する別の商品を検索し直して提案してください。"
-            "URLは実際にアクセスできるものだけ使ってください。"
-            "価格は商品ページに記載されている実際の価格を使ってください。"
-        )
-
-    return "\n".join(lines)
+    return items
 
 
 EXTRACTION_PROMPT = """以下のギフト提案テキストから商品情報を抽出し、JSON配列として出力してください。
@@ -318,8 +281,8 @@ EXTRACTION_PROMPT = """以下のギフト提案テキストから商品情報を
 出力ルール:
 - <<<ITEMS>>> と <<<END_ITEMS>>> で囲む
 - 各商品について以下のフィールドを必ず含める
-- product_url は提案テキストにURLがあればそれを使い、無ければブランド公式サイトのトップページURLを推測して入れる
-- search_keyword はブランド名+商品名の日本語検索キーワード
+- product_url はテキスト中に明示的なURLがある場合のみ使う。URLが無ければ空文字 "" にしろ。推測するな。
+- search_keyword はブランド名+商品名の日本語検索キーワード（必須）
 
 <<<ITEMS>>>
 [
@@ -332,7 +295,7 @@ EXTRACTION_PROMPT = """以下のギフト提案テキストから商品情報を
     "price_max": 数値,
     "reasoning": "テキストから要約した理由1〜2文",
     "tip": "ワンポイント1文",
-    "product_url": "商品またはブランドのURL",
+    "product_url": "",
     "search_keyword": "ブランド名 商品名"
   }
 ]
@@ -389,8 +352,11 @@ def _build_contents(history: list[dict], user_message: str) -> list[types.Conten
 
 async def chat(history: list[dict], user_message: str) -> dict:
     """
-    会話 → 提案があればURLをサーバー側で検証（価格含む） → 無効なら再提案を依頼するループ。
-    Google Search grounding で商品検索し、後検証で存在・価格を確認する。
+    シングルパスフロー:
+    1. Google Search ON で生成
+    2. <<<ITEMS>>> があればそのまま検証へ
+    3. なければ別リクエスト(Search OFF)で抽出
+    4. URL検証 + OG画像/価格抽出（失敗してもアイテムは消さない）
     """
     contents = _build_contents(history, user_message)
 
@@ -399,89 +365,46 @@ async def chat(history: list[dict], user_message: str) -> dict:
         try:
             logger.info(f"Trying model: {model_name}")
 
+            # Phase 1: Google Search ON で生成
             config = types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
                 temperature=0.8,
                 tools=[GOOGLE_SEARCH_TOOL],
             )
 
-            loop_contents = list(contents)
-            MAX_VERIFY_ROUNDS = 3
-            reply_text = ""
+            response = await client.aio.models.generate_content(
+                model=model_name,
+                contents=contents,
+                config=config,
+            )
 
-            for verify_round in range(MAX_VERIFY_ROUNDS):
-                response = await client.aio.models.generate_content(
-                    model=model_name,
-                    contents=loop_contents,
-                    config=config,
-                )
+            try:
+                reply_text = response.text
+            except (AttributeError, ValueError):
+                reply_text = "申し訳ありません。問題が発生しました。もう一度お試しください。"
+                return {"reply": reply_text, "items": [], "raw_reply": reply_text}
 
-                try:
-                    reply_text = response.text
-                except (AttributeError, ValueError):
-                    reply_text = "申し訳ありません。問題が発生しました。もう一度お試しください。"
-                    break
+            logger.info(f"Response (first 200): {reply_text[:200]}")
 
-                logger.info(f"[Round {verify_round + 1}] Response (first 200): {reply_text[:200]}")
-
-                result = parse_response(reply_text)
-
-                # ヒアリング中（商品提案なし）
-                if not result["items"]:
-                    # 長文なのに<<<ITEMS>>>が無い → Google Searchが構造化出力を妨げている
-                    # → Google Search なしの別リクエストでJSON抽出
-                    if len(reply_text) > 500:
-                        logger.warning(
-                            f"Long response ({len(reply_text)} chars) without <<<ITEMS>>> JSON. "
-                            "Extracting items via separate non-search request."
-                        )
-                        extracted = await _extract_items_from_text(reply_text, model_name)
-                        if extracted:
-                            result["items"] = extracted
-                            # 抽出成功 → URL検証フローへ進む（下の検証ブロックへ）
-                        else:
-                            logger.info("Extraction returned no items, returning as hearing phase")
-                            return {**result, "raw_reply": reply_text}
-                    else:
-                        logger.info("No items in response (hearing phase)")
-                        return {**result, "raw_reply": reply_text}
-
-                # ── 商品URLをサーバー側で検証（価格も抽出） ──
-                logger.info(f"Verifying {len(result['items'])} item URLs...")
-                verified, invalid = await _verify_items(result["items"])
-
-                logger.info(
-                    f"Verification: {len(verified)} valid, {len(invalid)} invalid"
-                )
-
-                if not invalid:
-                    # 全URL有効 → 返す（価格は実価格で上書き済み）
-                    result["items"] = verified
-                    return {**result, "raw_reply": reply_text}
-
-                if verify_round < MAX_VERIFY_ROUNDS - 1:
-                    # 無効URLあり → モデルにフィードバックして再提案
-                    feedback = _build_verification_feedback(invalid, verified)
-                    logger.info(f"Sending verification feedback to model:\n{feedback}")
-
-                    loop_contents.append(
-                        types.Content(role="model", parts=[types.Part(text=reply_text)])
-                    )
-                    loop_contents.append(
-                        types.Content(role="user", parts=[types.Part(text=feedback)])
-                    )
-                else:
-                    # 最終ラウンド → 有効な商品のみ返す
-                    logger.warning(
-                        f"Max verification rounds reached. "
-                        f"Returning {len(verified)} valid items, "
-                        f"dropping {len(invalid)} invalid."
-                    )
-                    result["items"] = verified
-                    return {**result, "raw_reply": reply_text}
-
-            # ループ正常終了（items無しで抜けた場合）
             result = parse_response(reply_text)
+
+            # Phase 2: <<<ITEMS>>> がなく長文 → 抽出リクエスト（Search OFF）
+            if not result["items"] and len(reply_text) > 500:
+                logger.info(
+                    f"Long response ({len(reply_text)} chars) without <<<ITEMS>>>. "
+                    "Extracting items via separate request."
+                )
+                result["items"] = await _extract_items_from_text(reply_text, model_name)
+
+            # ヒアリング中（items なし）→ テキストのみ返す
+            if not result["items"]:
+                logger.info("No items (hearing phase)")
+                return {**result, "raw_reply": reply_text}
+
+            # Phase 3: URL検証 + OG画像/価格抽出（アイテムは絶対に消さない）
+            logger.info(f"Verifying {len(result['items'])} items...")
+            result["items"] = await _verify_and_enrich(result["items"])
+
             return {**result, "raw_reply": reply_text}
 
         except Exception as e:
