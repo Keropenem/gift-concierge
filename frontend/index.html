@@ -3,143 +3,31 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Gift Concierge - ギフトコンシェルジュ</title>
+  <title>Gift Concierge</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="container">
+  <div class="app">
     <header>
       <h1>Gift Concierge</h1>
-      <p class="subtitle">大切な人にぴったりのプレゼントを見つけましょう</p>
+      <button id="reset-btn" title="新しい相談">新しい相談</button>
     </header>
 
-    <form id="gift-form">
-      <div class="form-grid">
-        <div class="form-group">
-          <label for="relationship">相手との関係</label>
-          <select id="relationship" name="relationship">
-            <option value="">選択してください</option>
-            <option value="恋人">恋人</option>
-            <option value="友人">友人</option>
-            <option value="家族（親）">家族（親）</option>
-            <option value="家族（兄弟姉妹）">家族（兄弟姉妹）</option>
-            <option value="家族（子供）">家族（子供）</option>
-            <option value="同僚">同僚</option>
-            <option value="上司">上司</option>
-            <option value="取引先">取引先</option>
-            <option value="その他">その他</option>
-          </select>
+    <main id="messages" class="messages"></main>
+
+    <footer>
+      <form id="chat-form">
+        <div class="input-row">
+          <textarea id="user-input" rows="1" placeholder="メッセージを入力..."
+                    maxlength="1000" autocomplete="off"></textarea>
+          <button type="submit" id="send-btn" disabled>
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+            </svg>
+          </button>
         </div>
-
-        <div class="form-group">
-          <label for="age_range">年代</label>
-          <select id="age_range" name="age_range">
-            <option value="">選択してください</option>
-            <option value="10代">10代</option>
-            <option value="20代">20代</option>
-            <option value="30代">30代</option>
-            <option value="40代">40代</option>
-            <option value="50代">50代</option>
-            <option value="60代">60代</option>
-            <option value="70代以上">70代以上</option>
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label for="gender">性別</label>
-          <select id="gender" name="gender">
-            <option value="">選択してください</option>
-            <option value="男性">男性</option>
-            <option value="女性">女性</option>
-            <option value="指定なし">指定なし</option>
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label for="occasion">イベント</label>
-          <select id="occasion" name="occasion">
-            <option value="">選択してください</option>
-            <option value="誕生日">誕生日</option>
-            <option value="クリスマス">クリスマス</option>
-            <option value="バレンタイン">バレンタイン</option>
-            <option value="ホワイトデー">ホワイトデー</option>
-            <option value="母の日">母の日</option>
-            <option value="父の日">父の日</option>
-            <option value="お中元">お中元</option>
-            <option value="お歳暮">お歳暮</option>
-            <option value="出産祝い">出産祝い</option>
-            <option value="結婚祝い">結婚祝い</option>
-            <option value="昇進祝い">昇進祝い</option>
-            <option value="お見舞い">お見舞い</option>
-            <option value="お礼">お礼</option>
-            <option value="特になし">特になし</option>
-          </select>
-        </div>
-      </div>
-
-      <div class="form-group budget-group">
-        <label>予算</label>
-        <div class="budget-display">
-          <span id="budget-min-display">1,000円</span>
-          <span> 〜 </span>
-          <span id="budget-max-display">10,000円</span>
-        </div>
-        <div class="range-wrapper">
-          <input type="range" id="budget_min" name="budget_min"
-                 min="1000" max="50000" step="1000" value="1000">
-          <input type="range" id="budget_max" name="budget_max"
-                 min="1000" max="50000" step="1000" value="10000">
-        </div>
-      </div>
-
-      <div class="form-group">
-        <label>趣味・好み（複数選択可）</label>
-        <div class="interests-grid">
-          <label class="chip"><input type="checkbox" name="interests" value="読書"><span>読書</span></label>
-          <label class="chip"><input type="checkbox" name="interests" value="音楽"><span>音楽</span></label>
-          <label class="chip"><input type="checkbox" name="interests" value="料理"><span>料理</span></label>
-          <label class="chip"><input type="checkbox" name="interests" value="スポーツ"><span>スポーツ</span></label>
-          <label class="chip"><input type="checkbox" name="interests" value="旅行"><span>旅行</span></label>
-          <label class="chip"><input type="checkbox" name="interests" value="ファッション"><span>ファッション</span></label>
-          <label class="chip"><input type="checkbox" name="interests" value="ガジェット"><span>ガジェット</span></label>
-          <label class="chip"><input type="checkbox" name="interests" value="お酒"><span>お酒</span></label>
-          <label class="chip"><input type="checkbox" name="interests" value="スイーツ"><span>スイーツ</span></label>
-          <label class="chip"><input type="checkbox" name="interests" value="アウトドア"><span>アウトドア</span></label>
-          <label class="chip"><input type="checkbox" name="interests" value="インテリア"><span>インテリア</span></label>
-          <label class="chip"><input type="checkbox" name="interests" value="美容・コスメ"><span>美容・コスメ</span></label>
-          <label class="chip"><input type="checkbox" name="interests" value="ペット"><span>ペット</span></label>
-          <label class="chip"><input type="checkbox" name="interests" value="ゲーム"><span>ゲーム</span></label>
-        </div>
-      </div>
-
-      <div class="form-group">
-        <label for="free_text">補足情報（自由記述）</label>
-        <textarea id="free_text" name="free_text" rows="4" maxlength="500"
-                  placeholder="例: 甘いものが大好きで、最近ヨガにハマっています。猫を2匹飼っています。仕事はIT系で在宅勤務が多いです。"></textarea>
-        <div class="char-count"><span id="char-count">0</span>/500</div>
-      </div>
-
-      <button type="submit" id="submit-btn">
-        <span class="btn-text">プレゼントを提案してもらう</span>
-        <span class="btn-loading" hidden>
-          <span class="spinner"></span>考え中...
-        </span>
-      </button>
-    </form>
-
-    <section id="results" hidden>
-      <h2>おすすめのプレゼント</h2>
-      <p id="results-message" class="results-message"></p>
-      <div id="results-list" class="results-list"></div>
-      <button id="retry-btn" class="retry-btn">もう一度提案してもらう</button>
-    </section>
-
-    <section id="error-section" hidden>
-      <div class="error-card">
-        <p id="error-message"></p>
-        <button id="error-close-btn" class="retry-btn">閉じる</button>
-      </div>
-    </section>
+      </form>
+    </footer>
   </div>
 
   <script src="script.js"></script>

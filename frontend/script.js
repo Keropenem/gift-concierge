@@ -1,142 +1,149 @@
-const form = document.getElementById("gift-form");
-const submitBtn = document.getElementById("submit-btn");
-const btnText = submitBtn.querySelector(".btn-text");
-const btnLoading = submitBtn.querySelector(".btn-loading");
-const resultsSection = document.getElementById("results");
-const resultsList = document.getElementById("results-list");
-const resultsMessage = document.getElementById("results-message");
-const errorSection = document.getElementById("error-section");
-const errorMessage = document.getElementById("error-message");
-const retryBtn = document.getElementById("retry-btn");
-const errorCloseBtn = document.getElementById("error-close-btn");
-const freeText = document.getElementById("free_text");
-const charCount = document.getElementById("char-count");
-const budgetMin = document.getElementById("budget_min");
-const budgetMax = document.getElementById("budget_max");
-const budgetMinDisplay = document.getElementById("budget-min-display");
-const budgetMaxDisplay = document.getElementById("budget-max-display");
+const messages = document.getElementById("messages");
+const chatForm = document.getElementById("chat-form");
+const userInput = document.getElementById("user-input");
+const sendBtn = document.getElementById("send-btn");
+const resetBtn = document.getElementById("reset-btn");
 
-// 予算スライダーの連動
-function formatYen(value) {
-  return Number(value).toLocaleString() + "円";
-}
+let sessionId = localStorage.getItem("gc-session") || crypto.randomUUID();
+localStorage.setItem("gc-session", sessionId);
 
-function updateBudgetDisplay() {
-  let min = Number(budgetMin.value);
-  let max = Number(budgetMax.value);
-  if (min > max) {
-    budgetMin.value = max;
-    min = max;
+let sending = false;
+
+// 初回挨拶
+addMessage("ai", "こんにちは。ギフトコンシェルジュです。どなたに、どんなきっかけで贈り物をお考えですか？");
+
+// 入力欄の自動リサイズ & 送信ボタン制御
+userInput.addEventListener("input", () => {
+  userInput.style.height = "auto";
+  userInput.style.height = Math.min(userInput.scrollHeight, 120) + "px";
+  sendBtn.disabled = !userInput.value.trim();
+});
+
+// Enter で送信（Shift+Enter で改行）
+userInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    if (userInput.value.trim() && !sending) {
+      chatForm.dispatchEvent(new Event("submit"));
+    }
   }
-  budgetMinDisplay.textContent = formatYen(min);
-  budgetMaxDisplay.textContent = formatYen(max);
-}
-
-budgetMin.addEventListener("input", updateBudgetDisplay);
-budgetMax.addEventListener("input", updateBudgetDisplay);
-
-// 文字数カウント
-freeText.addEventListener("input", () => {
-  charCount.textContent = freeText.value.length;
 });
 
-// フォーム送信
-form.addEventListener("submit", async (e) => {
+// 送信
+chatForm.addEventListener("submit", async (e) => {
   e.preventDefault();
-  await submitForm();
-});
+  const text = userInput.value.trim();
+  if (!text || sending) return;
 
-retryBtn.addEventListener("click", async () => {
-  await submitForm();
-});
+  addMessage("user", text);
+  userInput.value = "";
+  userInput.style.height = "auto";
+  sendBtn.disabled = true;
+  sending = true;
 
-errorCloseBtn.addEventListener("click", () => {
-  errorSection.hidden = true;
-});
-
-async function submitForm() {
-  const interests = Array.from(
-    form.querySelectorAll('input[name="interests"]:checked')
-  ).map((el) => el.value);
-
-  const data = {
-    relationship: form.relationship.value,
-    age_range: form.age_range.value,
-    gender: form.gender.value,
-    budget_min: Number(budgetMin.value),
-    budget_max: Number(budgetMax.value),
-    occasion: form.occasion.value,
-    interests,
-    free_text: freeText.value.trim(),
-  };
-
-  setLoading(true);
-  resultsSection.hidden = true;
-  errorSection.hidden = true;
+  const thinkingEl = addThinking();
 
   try {
-    const res = await fetch("/api/suggest", {
+    const res = await fetch("/api/chat", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
+      headers: {
+        "Content-Type": "application/json",
+        "X-Session-Id": sessionId,
+      },
+      body: JSON.stringify({ message: text }),
     });
+
+    thinkingEl.remove();
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || "サーバーエラーが発生しました。");
+      throw new Error(err.detail || `エラー [${res.status}]`);
     }
 
-    const result = await res.json();
-    renderResults(result);
+    const data = await res.json();
+
+    if (data.session_id) {
+      sessionId = data.session_id;
+      localStorage.setItem("gc-session", sessionId);
+    }
+
+    addMessage("ai", data.reply, data.items);
   } catch (err) {
-    showError(err.message);
+    thinkingEl.remove();
+    addMessage("error", err.message);
   } finally {
-    setLoading(false);
+    sending = false;
+    sendBtn.disabled = !userInput.value.trim();
+    userInput.focus();
   }
-}
+});
 
-function setLoading(loading) {
-  submitBtn.disabled = loading;
-  btnText.hidden = loading;
-  btnLoading.hidden = !loading;
-}
+// リセット
+resetBtn.addEventListener("click", async () => {
+  await fetch("/api/reset", {
+    method: "POST",
+    headers: { "X-Session-Id": sessionId },
+  }).catch(() => {});
 
-function renderResults(data) {
-  resultsMessage.textContent = data.message || "";
-  resultsList.innerHTML = "";
+  sessionId = crypto.randomUUID();
+  localStorage.setItem("gc-session", sessionId);
+  messages.innerHTML = "";
+  addMessage("ai", "こんにちは。ギフトコンシェルジュです。どなたに、どんなきっかけで贈り物をお考えですか？");
+});
 
-  if (!data.suggestions || data.suggestions.length === 0) {
-    resultsList.innerHTML = '<p class="no-results">提案が見つかりませんでした。条件を変えてお試しください。</p>';
-    resultsSection.hidden = false;
-    return;
+// メッセージ追加
+function addMessage(role, text, items) {
+  const wrapper = document.createElement("div");
+  wrapper.className = `msg msg-${role}`;
+
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+  bubble.textContent = text;
+  wrapper.appendChild(bubble);
+
+  // 商品カード
+  if (items && items.length > 0) {
+    const cardsContainer = document.createElement("div");
+    cardsContainer.className = "item-cards";
+
+    items.forEach((item) => {
+      const card = document.createElement("div");
+      card.className = "item-card";
+
+      const priceText =
+        item.price_min && item.price_max
+          ? `${Number(item.price_min).toLocaleString()}円〜${Number(item.price_max).toLocaleString()}円`
+          : "";
+
+      card.innerHTML = `
+        <div class="item-name">${escapeHtml(item.name || "")}</div>
+        <div class="item-reasoning">${escapeHtml(item.reasoning || "")}</div>
+        ${priceText ? `<div class="item-price">${priceText}</div>` : ""}
+        ${item.tip ? `<div class="item-tip">${escapeHtml(item.tip)}</div>` : ""}
+        <div class="item-actions">
+          ${item.product_url ? `<a href="${escapeHtml(item.product_url)}" target="_blank" rel="noopener" class="item-link">商品を見る</a>` : ""}
+          ${item.search_keyword ? `<a href="https://www.google.com/search?q=${encodeURIComponent(item.search_keyword)}" target="_blank" rel="noopener" class="item-search">検索する</a>` : ""}
+        </div>
+      `;
+      cardsContainer.appendChild(card);
+    });
+
+    wrapper.appendChild(cardsContainer);
   }
 
-  data.suggestions.forEach((item, i) => {
-    const card = document.createElement("div");
-    card.className = "result-card";
-    card.style.animationDelay = `${i * 0.1}s`;
-    card.innerHTML = `
-      <div class="card-header">
-        <span class="card-number">${i + 1}</span>
-        <h3 class="card-title">${escapeHtml(item.name)}</h3>
-      </div>
-      <p class="card-reason">${escapeHtml(item.reason)}</p>
-      <div class="card-meta">
-        <span class="tag price">${escapeHtml(item.price_range)}</span>
-        <span class="tag category">${escapeHtml(item.category)}</span>
-        <span class="tag where">${escapeHtml(item.where_to_buy)}</span>
-      </div>
-    `;
-    resultsList.appendChild(card);
-  });
-
-  resultsSection.hidden = false;
-  resultsSection.scrollIntoView({ behavior: "smooth", block: "start" });
+  messages.appendChild(wrapper);
+  messages.scrollTop = messages.scrollHeight;
+  return wrapper;
 }
 
-function showError(msg) {
-  errorMessage.textContent = msg;
-  errorSection.hidden = false;
+// 思考中インジケーター
+function addThinking() {
+  const wrapper = document.createElement("div");
+  wrapper.className = "msg msg-ai";
+  wrapper.innerHTML = '<div class="bubble thinking"><span></span><span></span><span></span></div>';
+  messages.appendChild(wrapper);
+  messages.scrollTop = messages.scrollHeight;
+  return wrapper;
 }
 
 function escapeHtml(text) {
