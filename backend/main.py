@@ -164,4 +164,4 @@ async def page_form():
 
 
 # 静的ファイル配信（フロントエンド） ← 必ず最後に定義
-app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
+app.mount("/", StaticFiles(directory=str(FRONTEND), html=True), name="frontend")
