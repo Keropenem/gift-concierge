@@ -628,28 +628,25 @@ async def chat(history: list[dict], user_message: str) -> dict:
                 logger.info(f"Verifying {len(result['items'])} items...")
                 enriched_items = await _verify_and_enrich(result["items"])
 
-                # 確認: 元々URLがなかったのか、それとも検証で弾かれた（空にされた）のか
-                invalid_count = 0
+                # 確認: 検証で弾かれた（URLがあったのに空にされた）アイテムだけをカウント
+                # URL finder でも見つからなかった（元々空）ものはリトライ対象にしない
+                broken_count = 0
                 error_msg = ""
                 for orig_url, enriched in zip(orig_urls, enriched_items):
                     final_url = enriched.get("product_url", "")
-                    
-                    if not final_url:
-                        invalid_count += 1
-                        if not orig_url:
-                            error_msg = "システムエラー: 商品のURLが出力されていません。必ずGoogle検索で実際の公式販売ページ等を見つけ、そのURLを文章の最後に「【公式販売サイト】 https://...」のように記載してください。推測は厳禁です。\n"
-                        else:
-                            error_msg = f"システムエラー: 前回提案したURL ({orig_url}) はリンク切れかアクセス不可（404等）でした。別の実在する商品を探すか、正しいURLを見つけて、最初から提案し直してください。\n"
-                        
+                    # 元々URLがあったのに検証で消された場合のみリトライ対象
+                    if orig_url and not final_url:
+                        broken_count += 1
+                        error_msg = f"システムエラー: 前回提案したURL ({orig_url}) はリンク切れかアクセス不可（404等）でした。別の実在する商品を探すか、正しいURLを見つけて、最初から提案し直してください。\n"
                         error_msg += "【重要】ユーザーにはこのエラーを見せません。新しい文章の冒頭で絶対に謝罪したり、システムエラーについて言及したりしないでください。エラーなど無かったかのように、いきなり自然な商品提案の文章（導入部分）から書き始めてください。"
 
-                if invalid_count == 0:
+                if broken_count == 0:
                     # 全て検証成功
                     result["items"] = enriched_items
                     return {**result, "reply": _clean_reply_text(result["reply"]), "raw_reply": reply_text}
 
                 if attempt < MAX_VALIDATION_RETRIES - 1:
-                    logger.warning(f"Found {invalid_count} invalid URLs. Retrying: {error_msg}")
+                    logger.warning(f"Found {broken_count} broken URLs. Retrying: {error_msg}")
                     # ユーザーには見せず、システムからAIへ修正要求
                     contents.append(types.Content(
                         role="model",

@@ -2,8 +2,11 @@ import logging
 import time
 import uuid
 
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -92,6 +95,19 @@ async def api_reset(raw_request: Request):
     if session_id in sessions:
         del sessions[session_id]
     return {"status": "ok"}
+
+
+FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
+
+
+@app.get("/chat")
+async def page_chat():
+    return FileResponse(FRONTEND / "chat.html")
+
+
+@app.get("/form")
+async def page_form():
+    return FileResponse(FRONTEND / "form.html")
 
 
 # 静的ファイル配信（フロントエンド） ← 必ず最後に定義
