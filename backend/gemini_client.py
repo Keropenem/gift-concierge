@@ -36,6 +36,12 @@ ITEMS_PATTERN = re.compile(
 # テキスト中のURL抽出用
 URL_IN_TEXT_PATTERN = re.compile(r'https?://[^\s<>"\')\]]+')
 
+# 文末の【公式販売サイト】セクションを除去（カードに表示するので本文からは不要）
+TRAILING_URL_PATTERN = re.compile(
+    r"\n*【公式(?:販売)?サイト】\s*\n?https?://[^\s]+\s*$",
+    re.MULTILINE,
+)
+
 OG_IMAGE_PATTERN = re.compile(
     r'<meta[^>]+(?:property|name)=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']'
     r'|<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\']og:image["\']',
@@ -106,6 +112,14 @@ def parse_response(text: str) -> dict:
         return {"reply": reply, "items": items}
 
     return {"reply": text.strip(), "items": []}
+
+
+def _clean_reply_text(text: str) -> str:
+    """表示用テキストから【公式販売サイト】URLセクションや生URLを除去する"""
+    cleaned = TRAILING_URL_PATTERN.sub("", text)
+    # 単独行のURLも除去（カードに表示するので本文には不要）
+    cleaned = re.sub(r"^\s*https?://[^\s]+\s*$", "", cleaned, flags=re.MULTILINE)
+    return cleaned.strip()
 
 
 # ── 価格抽出 ──
@@ -225,13 +239,31 @@ def _verify_url_sync(url: str) -> dict:
         # 価格抽出
         price_info = _extract_price_from_html(html)
 
+        # リダイレクトでトップページに飛ばされたかチェック
+        from urllib.parse import urlparse
+        orig_path = urlparse(url).path.rstrip("/")
+        final_path = urlparse(final_url).path.rstrip("/")
+        redirected_to_home = (
+            orig_path and len(orig_path) > 3
+            and (not final_path or len(final_path) <= 3)
+        )
+
+        is_product = bool(
+            status == 200
+            and not redirected_to_home
+            and not _is_homepage_url(final_url)
+        )
+
+        if redirected_to_home:
+            logger.info(f"URL redirected to homepage: {url} → {final_url}")
+
         return {
             "accessible": True,
             "status_code": status,
             "final_url": final_url,
             "page_title": title[:200],
             "og_image_url": og_image,
-            "is_product_page": bool(status == 200),
+            "is_product_page": is_product,
             "price": price_info.get("price"),
             "high_price": price_info.get("high_price"),
             "currency": price_info.get("currency", ""),
@@ -572,7 +604,7 @@ async def chat(history: list[dict], user_message: str) -> dict:
                 # ヒアリング中（items なし）→ テキストのみ返す
                 if not result["items"]:
                     logger.info("No items (hearing phase)")
-                    return {**result, "raw_reply": reply_text}
+                    return {**result, "reply": _clean_reply_text(result["reply"]), "raw_reply": reply_text}
 
                 # テキスト中のURLをアイテムに注入（抽出モデルが見逃した場合）
                 result["items"] = _inject_urls_from_text(result["items"], reply_text)
@@ -605,7 +637,7 @@ async def chat(history: list[dict], user_message: str) -> dict:
                 if invalid_count == 0:
                     # 全て検証成功
                     result["items"] = enriched_items
-                    return {**result, "raw_reply": reply_text}
+                    return {**result, "reply": _clean_reply_text(result["reply"]), "raw_reply": reply_text}
 
                 if attempt < MAX_VALIDATION_RETRIES - 1:
                     logger.warning(f"Found {invalid_count} invalid URLs. Retrying: {error_msg}")
@@ -621,7 +653,7 @@ async def chat(history: list[dict], user_message: str) -> dict:
                 else:
                     logger.warning("Max validation retries reached. Returning gracefully.")
                     result["items"] = enriched_items
-                    return {**result, "raw_reply": reply_text}
+                    return {**result, "reply": _clean_reply_text(result["reply"]), "raw_reply": reply_text}
 
         except Exception as e:
             last_error = e
