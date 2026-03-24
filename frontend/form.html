@@ -7,145 +7,155 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="app">
-    <header>
-      <h1>Gift Concierge</h1>
-      <div class="header-actions">
-        <button id="debug-copy" class="debug-copy-btn" onclick="copyDebugTrace()" style="display:none;">Copy Trace</button>
-        <button id="debug-toggle" class="debug-toggle-btn" onclick="toggleDebugMode()">Debug: OFF</button>
-        <button id="reset-btn" title="新しい相談">新しい相談</button>
-      </div>
-    </header>
+  <div class="app-wrapper">
+    <div class="app">
+      <header>
+        <h1>Gift Concierge</h1>
+        <div class="header-actions">
+          <button id="debug-copy" class="debug-copy-btn" onclick="copyDebugTrace()">Copy</button>
+          <button id="debug-clear" class="debug-copy-btn" onclick="clearDebugLog()">Clear</button>
+          <button id="debug-toggle" class="debug-toggle-btn" onclick="toggleDebugMode()">Debug: OFF</button>
+          <button id="reset-btn" title="新しい相談">新しい相談</button>
+        </div>
+      </header>
 
-    <!-- Phase 1: フォーム -->
-    <main id="form-phase" class="form-phase">
-      <div class="form-container">
-        <h2 class="form-heading">贈り物の情報を入力してください</h2>
+      <!-- Phase 1: フォーム -->
+      <main id="form-phase" class="form-phase">
+        <div class="form-container">
+          <h2 class="form-heading">贈り物の情報を入力してください</h2>
 
-        <form id="gift-form">
-          <!-- 構造化フィールド -->
-          <div class="form-section">
-            <div class="form-row">
-              <label for="relationship">相手との関係</label>
-              <select id="relationship" required>
-                <option value="">選択してください</option>
-                <option value="友人">友人</option>
-                <option value="家族">家族</option>
-                <option value="恋人">恋人</option>
-                <option value="同僚">同僚</option>
-                <option value="上司">上司</option>
-                <option value="その他">その他</option>
-              </select>
-              <input type="text" id="relationship-other" class="other-input"
-                     placeholder="具体的に（例: 恩師、主治医、義母など）" style="display:none;">
-            </div>
-
-            <div class="form-row">
-              <label>相手の性別</label>
-              <div class="radio-group">
-                <label><input type="radio" name="gender" value="女性"> 女性</label>
-                <label><input type="radio" name="gender" value="男性"> 男性</label>
-                <label><input type="radio" name="gender" value="未回答"> その他/未回答</label>
-              </div>
-            </div>
-
-            <div class="form-row">
-              <label for="age">相手の年代</label>
-              <select id="age">
-                <option value="">選択してください</option>
-                <option value="10代">10代</option>
-                <option value="20代">20代</option>
-                <option value="30代">30代</option>
-                <option value="40代">40代</option>
-                <option value="50代">50代</option>
-                <option value="60代">60代</option>
-                <option value="70代以上">70代以上</option>
-              </select>
-            </div>
-
-            <div class="form-row">
-              <label for="occasion">何のための贈り物？</label>
-              <select id="occasion" required>
-                <option value="">選択してください</option>
-                <option value="誕生日">誕生日</option>
-                <option value="結婚祝い">結婚祝い</option>
-                <option value="出産祝い">出産祝い</option>
-                <option value="お礼・感謝">お礼・感謝</option>
-                <option value="送別・引越し">送別・引越し</option>
-                <option value="クリスマス">クリスマス</option>
-                <option value="バレンタイン/ホワイトデー">バレンタイン/ホワイトデー</option>
-                <option value="お土産">旅行のお土産</option>
-                <option value="就職・昇進祝い">就職・昇進祝い</option>
-                <option value="その他">その他</option>
-              </select>
-              <input type="text" id="occasion-other" class="other-input"
-                     placeholder="具体的に（例: 退院祝い、記念日など）" style="display:none;">
-              <textarea id="occasion-context" rows="2" class="occasion-context"
-                        placeholder="例: オーストラリア旅行のお土産として / 3年ぶりに会う友人に / 転職する同僚の送別会で"></textarea>
-            </div>
-
-            <div class="form-row">
-              <label for="budget">予算</label>
-              <div class="budget-group">
-                <select id="budget-select">
-                  <option value="">目安を選ぶ</option>
-                  <option value="〜3,000円">〜3,000円</option>
-                  <option value="〜5,000円">〜5,000円</option>
-                  <option value="〜10,000円">〜10,000円</option>
-                  <option value="〜30,000円">〜30,000円</option>
-                  <option value="30,000円以上">30,000円以上</option>
+          <form id="gift-form">
+            <!-- 構造化フィールド -->
+            <div class="form-section">
+              <div class="form-row">
+                <label for="relationship">相手との関係</label>
+                <select id="relationship" required>
+                  <option value="">選択してください</option>
+                  <option value="友人">友人</option>
+                  <option value="家族">家族</option>
+                  <option value="恋人">恋人</option>
+                  <option value="同僚">同僚</option>
+                  <option value="上司">上司</option>
+                  <option value="その他">その他</option>
                 </select>
-                <div class="budget-free">
-                  <span class="budget-or">または</span>
-                  <input type="number" id="budget-free" placeholder="金額を入力" min="0" step="1000">
-                  <span class="budget-unit">円くらい</span>
+                <input type="text" id="relationship-other" class="other-input"
+                       placeholder="具体的に（例: 恩師、主治医、義母など）" style="display:none;">
+              </div>
+
+              <div class="form-row">
+                <label>相手の性別</label>
+                <div class="radio-group">
+                  <label><input type="radio" name="gender" value="女性"> 女性</label>
+                  <label><input type="radio" name="gender" value="男性"> 男性</label>
+                  <label><input type="radio" name="gender" value="未回答"> その他/未回答</label>
+                </div>
+              </div>
+
+              <div class="form-row">
+                <label for="age">相手の年代</label>
+                <select id="age">
+                  <option value="">選択してください</option>
+                  <option value="10代">10代</option>
+                  <option value="20代">20代</option>
+                  <option value="30代">30代</option>
+                  <option value="40代">40代</option>
+                  <option value="50代">50代</option>
+                  <option value="60代">60代</option>
+                  <option value="70代以上">70代以上</option>
+                </select>
+              </div>
+
+              <div class="form-row">
+                <label for="occasion">何のための贈り物？</label>
+                <select id="occasion" required>
+                  <option value="">選択してください</option>
+                  <option value="誕生日">誕生日</option>
+                  <option value="結婚祝い">結婚祝い</option>
+                  <option value="出産祝い">出産祝い</option>
+                  <option value="お礼・感謝">お礼・感謝</option>
+                  <option value="送別・引越し">送別・引越し</option>
+                  <option value="クリスマス">クリスマス</option>
+                  <option value="バレンタイン/ホワイトデー">バレンタイン/ホワイトデー</option>
+                  <option value="お土産">旅行のお土産</option>
+                  <option value="就職・昇進祝い">就職・昇進祝い</option>
+                  <option value="その他">その他</option>
+                </select>
+                <input type="text" id="occasion-other" class="other-input"
+                       placeholder="具体的に（例: 退院祝い、記念日など）" style="display:none;">
+                <textarea id="occasion-context" rows="2" class="occasion-context"
+                          placeholder="例: オーストラリア旅行のお土産として / 3年ぶりに会う友人に / 転職する同僚の送別会で"></textarea>
+              </div>
+
+              <div class="form-row">
+                <label for="budget">予算</label>
+                <div class="budget-group">
+                  <select id="budget-select">
+                    <option value="">目安を選ぶ</option>
+                    <option value="〜3,000円">〜3,000円</option>
+                    <option value="〜5,000円">〜5,000円</option>
+                    <option value="〜10,000円">〜10,000円</option>
+                    <option value="〜30,000円">〜30,000円</option>
+                    <option value="30,000円以上">30,000円以上</option>
+                  </select>
+                  <div class="budget-free">
+                    <span class="budget-or">または</span>
+                    <input type="number" id="budget-free" placeholder="金額を入力" min="0" step="1000">
+                    <span class="budget-unit">円くらい</span>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
 
-          <!-- 自由テキスト -->
-          <div class="form-section">
-            <div class="form-row">
-              <label for="recipient-detail">相手はどんな人？</label>
-              <textarea id="recipient-detail" rows="3"
-                        placeholder="人物像、趣味、ライフスタイル、最近の状況など"></textarea>
+            <!-- 自由テキスト -->
+            <div class="form-section">
+              <div class="form-row">
+                <label for="recipient-detail">相手はどんな人？</label>
+                <textarea id="recipient-detail" rows="3"
+                          placeholder="人物像、趣味、ライフスタイル、最近の状況など"></textarea>
+              </div>
+
+              <div class="form-row">
+                <label for="sender-detail">あなた自身について</label>
+                <textarea id="sender-detail" rows="3"
+                          placeholder="職業、価値観、最近の変化など"></textarea>
+              </div>
+
+              <div class="form-row">
+                <label for="situation">伝えたい気持ち・エピソード</label>
+                <textarea id="situation" rows="3"
+                          placeholder="どんな気持ちを届けたいか、二人の間のエピソードなど"></textarea>
+              </div>
             </div>
 
-            <div class="form-row">
-              <label for="sender-detail">あなた自身について</label>
-              <textarea id="sender-detail" rows="3"
-                        placeholder="職業、価値観、最近の変化など"></textarea>
-            </div>
-
-            <div class="form-row">
-              <label for="situation">伝えたい気持ち・エピソード</label>
-              <textarea id="situation" rows="3"
-                        placeholder="どんな気持ちを届けたいか、二人の間のエピソードなど"></textarea>
-            </div>
-          </div>
-
-          <button type="submit" class="form-submit">提案をもらう</button>
-        </form>
-      </div>
-    </main>
-
-    <!-- Phase 2: チャット（フォーム送信後に表示） -->
-    <main id="chat-phase" class="messages" style="display:none;"></main>
-
-    <footer id="chat-footer" style="display:none;">
-      <form id="chat-form">
-        <div class="input-row">
-          <textarea id="user-input" rows="1" placeholder="メッセージを入力..."
-                    maxlength="1000" autocomplete="off"></textarea>
-          <button type="submit" id="send-btn" disabled>
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
-            </svg>
-          </button>
+            <button type="submit" class="form-submit">提案をもらう</button>
+          </form>
         </div>
-      </form>
-    </footer>
+      </main>
+
+      <!-- Phase 2: チャット（フォーム送信後に表示） -->
+      <main id="chat-phase" class="messages" style="display:none;"></main>
+
+      <footer id="chat-footer" style="display:none;">
+        <form id="chat-form">
+          <div class="input-row">
+            <textarea id="user-input" rows="1" placeholder="メッセージを入力..."
+                      maxlength="1000" autocomplete="off"></textarea>
+            <button type="submit" id="send-btn" disabled>
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+              </svg>
+            </button>
+          </div>
+        </form>
+      </footer>
+    </div>
+
+    <aside id="debug-panel" class="debug-panel" style="display:none;">
+      <div class="debug-panel-header">
+        <span>Debug Stream</span>
+      </div>
+      <div id="debug-log" class="debug-log"></div>
+    </aside>
   </div>
 
   <script src="shared.js"></script>

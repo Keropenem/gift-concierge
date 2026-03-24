@@ -36,6 +36,8 @@ document.getElementById("budget-free").addEventListener("input", (e) => {
 // フォーム送信 → チャットに遷移
 giftForm.addEventListener("submit", async (e) => {
   e.preventDefault();
+  if (sending) return;
+  sending = true;
 
   let relationship = document.getElementById("relationship").value;
   if (relationship === "その他") {
@@ -81,6 +83,10 @@ giftForm.addEventListener("submit", async (e) => {
     situation ? `【伝えたい気持ち】${situation}` : "",
   ].filter(Boolean).join("\n\n");
 
+  // 送信ボタン無効化（二重送信防止）
+  const submitBtn = giftForm.querySelector(".form-submit");
+  if (submitBtn) submitBtn.disabled = true;
+
   // フォーム非表示 → チャット表示
   formPhase.style.display = "none";
   chatPhase.style.display = "";
@@ -88,6 +94,13 @@ giftForm.addEventListener("submit", async (e) => {
 
   // ユーザーの入力内容をチャットに表示
   addMessage(chatPhase, "user", message);
+
+  // デバッグモード時: ログクリア＆SSE再接続
+  if (_debugMode) {
+    clearDebugLog();
+    connectDebugSSE();
+  }
+
   const thinkingEl = addThinking(chatPhase);
 
   try {
@@ -103,6 +116,8 @@ giftForm.addEventListener("submit", async (e) => {
   } catch (err) {
     thinkingEl.remove();
     addMessage(chatPhase, "error", err.message);
+  } finally {
+    sending = false;
   }
 
   userInput.focus();
@@ -134,6 +149,12 @@ chatForm.addEventListener("submit", async (e) => {
   userInput.style.height = "auto";
   sendBtn.disabled = true;
   sending = true;
+
+  // デバッグモード時: ログクリア＆SSE再接続
+  if (_debugMode) {
+    clearDebugLog();
+    connectDebugSSE();
+  }
 
   const thinkingEl = addThinking(chatPhase);
 

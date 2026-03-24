@@ -3,6 +3,8 @@
 // ── デバッグモード管理 ──
 let _debugMode = false;
 let _lastDebugData = null;
+let _debugSSE = null;
+let _debugEntries = [];
 
 async function toggleDebugMode() {
   const res = await fetch("/api/debug", { method: "POST" });
@@ -12,6 +14,17 @@ async function toggleDebugMode() {
   if (btn) {
     btn.textContent = _debugMode ? "Debug: ON" : "Debug: OFF";
     btn.classList.toggle("debug-on", _debugMode);
+  }
+  // パネル表示切り替え
+  const panel = document.getElementById("debug-panel");
+  if (panel) {
+    panel.style.display = _debugMode ? "" : "none";
+  }
+  // デバッグON時はSSE接続開始
+  if (_debugMode) {
+    connectDebugSSE();
+  } else {
+    disconnectDebugSSE();
   }
   return _debugMode;
 }
@@ -26,12 +39,115 @@ async function checkDebugMode() {
       btn.textContent = _debugMode ? "Debug: ON" : "Debug: OFF";
       btn.classList.toggle("debug-on", _debugMode);
     }
+    const panel = document.getElementById("debug-panel");
+    if (panel) {
+      panel.style.display = _debugMode ? "" : "none";
+    }
+    if (_debugMode) {
+      connectDebugSSE();
+    }
   } catch {}
 }
 
+function getSessionId() {
+  // chat.js / form.js がグローバルに sessionId を持っている
+  return typeof sessionId !== "undefined" ? sessionId : "";
+}
+
+function connectDebugSSE() {
+  disconnectDebugSSE();
+  const sid = getSessionId();
+  if (!sid) return;
+  _debugSSE = new EventSource(`/api/debug/stream?session_id=${encodeURIComponent(sid)}`);
+  _debugSSE.addEventListener("debug", (e) => {
+    try {
+      const entry = JSON.parse(e.data);
+      _debugEntries.push(entry);
+      appendDebugEntry(entry);
+    } catch {}
+  });
+  _debugSSE.onerror = () => {
+    // 自動再接続はEventSourceがやる
+  };
+}
+
+function disconnectDebugSSE() {
+  if (_debugSSE) {
+    _debugSSE.close();
+    _debugSSE = null;
+  }
+}
+
+function appendDebugEntry(entry) {
+  const log = document.getElementById("debug-log");
+  if (!log) return;
+  const line = document.createElement("div");
+  line.className = "debug-entry";
+
+  const elapsed = entry.elapsed_sec != null ? `${entry.elapsed_sec}s` : "";
+  const duration = entry.duration_sec != null && entry.duration_sec >= 0.1 ? `+${entry.duration_sec}s` : "";
+  const stepName = entry.step || "?";
+
+  // ステップ名と経過時間
+  const header = document.createElement("span");
+  header.className = "debug-entry-header";
+  header.textContent = `[${elapsed}] ${stepName}`;
+
+  // 所要時間バッジ（0.1秒以上のみ表示）
+  if (duration) {
+    const badge = document.createElement("span");
+    badge.className = "debug-duration";
+    badge.textContent = duration;
+    header.appendChild(document.createTextNode(" "));
+    header.appendChild(badge);
+  }
+  line.appendChild(header);
+
+  // データ部分（step, elapsed_sec, duration_sec以外）- クリックで展開
+  const extra = {};
+  for (const [k, v] of Object.entries(entry)) {
+    if (k !== "step" && k !== "elapsed_sec" && k !== "duration_sec") extra[k] = v;
+  }
+  if (Object.keys(extra).length > 0) {
+    // 短いサマリーをヘッダー横に表示
+    const keys = Object.keys(extra);
+    const summary = keys.slice(0, 3).map(k => {
+      const v = extra[k];
+      const s = typeof v === "string" ? v : JSON.stringify(v);
+      return `${k}=${s.length > 30 ? s.slice(0, 30) + "…" : s}`;
+    }).join(", ");
+    const summarySpan = document.createElement("span");
+    summarySpan.className = "debug-entry-summary";
+    summarySpan.textContent = ` ${summary}`;
+    header.appendChild(summarySpan);
+
+    const detail = document.createElement("pre");
+    detail.className = "debug-entry-data";
+    detail.style.display = "none";
+    detail.textContent = JSON.stringify(extra, null, 2);
+    line.appendChild(detail);
+
+    // クリックで展開/折りたたみ
+    header.style.cursor = "pointer";
+    header.addEventListener("click", () => {
+      detail.style.display = detail.style.display === "none" ? "" : "none";
+    });
+  }
+
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
+
+function clearDebugLog() {
+  _debugEntries = [];
+  const log = document.getElementById("debug-log");
+  if (log) log.innerHTML = "";
+}
+
 function copyDebugTrace() {
-  if (!_lastDebugData) return;
-  const text = _lastDebugData.map(step => JSON.stringify(step, null, 2)).join("\n");
+  const data = _debugEntries.length ? _debugEntries : _lastDebugData;
+  if (!data || !data.length) return;
+  const text = data.map(step => JSON.stringify(step, null, 2)).join("\n");
   navigator.clipboard.writeText(text).then(() => {
     const btn = document.getElementById("debug-copy");
     if (btn) {
@@ -113,11 +229,9 @@ function addMessage(messagesEl, role, text, items, debugData) {
   messagesEl.appendChild(wrapper);
   messagesEl.scrollTop = messagesEl.scrollHeight;
 
-  // デバッグデータを保存し、コピーボタンを表示
+  // デバッグデータを保存
   if (debugData && debugData.length) {
     _lastDebugData = debugData;
-    const copyBtn = document.getElementById("debug-copy");
-    if (copyBtn) copyBtn.style.display = "";
   }
 
   return wrapper;

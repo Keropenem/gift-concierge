@@ -7,31 +7,41 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="app">
-    <header>
-      <h1>Gift Concierge</h1>
-      <div class="header-actions">
-        <button id="debug-copy" class="debug-copy-btn" onclick="copyDebugTrace()" style="display:none;">Copy Trace</button>
-        <button id="debug-toggle" class="debug-toggle-btn" onclick="toggleDebugMode()">Debug: OFF</button>
-        <button id="reset-btn" title="新しい相談">新しい相談</button>
-      </div>
-    </header>
-
-    <main id="messages" class="messages"></main>
-
-    <footer>
-      <form id="chat-form">
-        <div class="input-row">
-          <textarea id="user-input" rows="1" placeholder="メッセージを入力..."
-                    maxlength="1000" autocomplete="off"></textarea>
-          <button type="submit" id="send-btn" disabled>
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
-            </svg>
-          </button>
+  <div class="app-wrapper">
+    <div class="app">
+      <header>
+        <h1>Gift Concierge</h1>
+        <div class="header-actions">
+          <button id="debug-copy" class="debug-copy-btn" onclick="copyDebugTrace()">Copy</button>
+          <button id="debug-clear" class="debug-copy-btn" onclick="clearDebugLog()">Clear</button>
+          <button id="debug-toggle" class="debug-toggle-btn" onclick="toggleDebugMode()">Debug: OFF</button>
+          <button id="reset-btn" title="新しい相談">新しい相談</button>
         </div>
-      </form>
-    </footer>
+      </header>
+
+      <main id="messages" class="messages"></main>
+
+      <footer>
+        <form id="chat-form">
+          <div class="input-row">
+            <textarea id="user-input" rows="1" placeholder="メッセージを入力..."
+                      maxlength="1000" autocomplete="off"></textarea>
+            <button type="submit" id="send-btn" disabled>
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+              </svg>
+            </button>
+          </div>
+        </form>
+      </footer>
+    </div>
+
+    <aside id="debug-panel" class="debug-panel" style="display:none;">
+      <div class="debug-panel-header">
+        <span>Debug Stream</span>
+      </div>
+      <div id="debug-log" class="debug-log"></div>
+    </aside>
   </div>
 
   <script src="shared.js"></script>

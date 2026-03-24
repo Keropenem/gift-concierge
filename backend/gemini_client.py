@@ -25,27 +25,54 @@ client = genai.Client(api_key=api_key)
 # ── デバッグモード ──
 DEBUG_MODE = os.getenv("GC_DEBUG", "0") == "1"
 
+# SSE用: セッションごとのアクティブなデバッグキュー
+# {session_id: asyncio.Queue}
+_debug_queues: dict[str, asyncio.Queue] = {}
+
 
 def set_debug_mode(enabled: bool):
     global DEBUG_MODE
     DEBUG_MODE = enabled
 
 
+def subscribe_debug(session_id: str) -> asyncio.Queue:
+    """セッションのデバッグイベントを購読する"""
+    q = asyncio.Queue()
+    _debug_queues[session_id] = q
+    return q
+
+
+def unsubscribe_debug(session_id: str):
+    """デバッグ購読を解除する"""
+    _debug_queues.pop(session_id, None)
+
+
 class DebugTrace:
     """パイプラインの各ステップを記録するデバッグトレーサー"""
 
-    def __init__(self):
+    def __init__(self, session_id: str = ""):
         self.steps: list[dict] = []
         self._start_time = _time.time()
+        self._last_step_time = self._start_time
+        self._session_id = session_id
 
     def step(self, name: str, **data):
         """ステップを記録"""
-        elapsed = round(_time.time() - self._start_time, 2)
-        entry = {"step": name, "elapsed_sec": elapsed, **data}
+        now = _time.time()
+        elapsed = round(now - self._start_time, 2)
+        duration = round(now - self._last_step_time, 2)
+        self._last_step_time = now
+        entry = {"step": name, "elapsed_sec": elapsed, "duration_sec": duration, **data}
         self.steps.append(entry)
         if DEBUG_MODE:
-            # ログにも出力
             logger.info(f"[DEBUG TRACE] {name}: {json.dumps(data, ensure_ascii=False, default=str)[:500]}")
+            # SSEキューにプッシュ
+            q = _debug_queues.get(self._session_id)
+            if q:
+                try:
+                    q.put_nowait(entry)
+                except asyncio.QueueFull:
+                    pass
 
     def to_dict(self) -> list[dict]:
         return self.steps
@@ -281,6 +308,7 @@ def _verify_url_sync(url: str) -> dict:
             status == 200
             and not redirected_to_home
             and not _is_homepage_url(final_url)
+            and not _is_category_url(final_url)
         )
 
         if redirected_to_home:
@@ -474,6 +502,31 @@ def _is_homepage_url(url: str) -> bool:
     return False
 
 
+# カテゴリ/一覧ページのパスパターン
+_CATEGORY_PATH_PATTERNS = re.compile(
+    r"/(collections|categories|category|catalog|shop|products|search|browse|tag|tags)"
+    r"(/[^/]+)?/?$",
+    re.IGNORECASE,
+)
+
+
+def _is_category_url(url: str) -> bool:
+    """URLがカテゴリ/コレクション一覧ページかどうかを判定する"""
+    if not url:
+        return False
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    path = parsed.path.rstrip("/")
+    # /collections/perfumes, /category/gifts 等はカテゴリページ
+    if _CATEGORY_PATH_PATTERNS.search(path):
+        # ただし /products/specific-item のような個別商品は除外
+        # 3セグメント以上（/collections/type/item-slug）はOK
+        segments = [s for s in path.split("/") if s]
+        if len(segments) <= 2:
+            return True
+    return False
+
+
 async def _find_product_urls(items: list[dict], model_name: str, trace: DebugTrace = None) -> list[dict]:
     """
     各商品の名前・ブランドを使って、Google Searchで商品詳細ページのURLを探す。
@@ -508,18 +561,21 @@ async def _find_product_urls(items: list[dict], model_name: str, trace: DebugTra
     logger.info(f"Finding product URLs for {len(targets)} items...")
 
     try:
-        response = await client.aio.models.generate_content(
-            model=model_name,
-            contents=[
-                types.Content(
-                    role="user",
-                    parts=[types.Part(text=query)],
-                )
-            ],
-            config=types.GenerateContentConfig(
-                temperature=0.1,
-                tools=[GOOGLE_SEARCH_TOOL],
+        response = await asyncio.wait_for(
+            client.aio.models.generate_content(
+                model=model_name,
+                contents=[
+                    types.Content(
+                        role="user",
+                        parts=[types.Part(text=query)],
+                    )
+                ],
+                config=types.GenerateContentConfig(
+                    temperature=0.1,
+                    tools=[GOOGLE_SEARCH_TOOL],
+                ),
             ),
+            timeout=30,
         )
         result_text = response.text
         logger.info(f"URL finder response: {result_text[:500]}")
@@ -546,8 +602,8 @@ async def _find_product_urls(items: list[dict], model_name: str, trace: DebugTra
             if j < len(found_urls) and found_urls[j]:
                 old_url = items[idx].get("product_url", "")
                 new_url = found_urls[j]
-                is_home = _is_homepage_url(new_url)
-                if not is_home:
+                is_bad = _is_homepage_url(new_url) or _is_category_url(new_url)
+                if not is_bad:
                     items[idx]["product_url"] = new_url
                     assigned.append({"name": items[idx].get("name", "?"), "old": old_url or "(none)", "new": new_url})
                     logger.info(
@@ -555,13 +611,17 @@ async def _find_product_urls(items: list[dict], model_name: str, trace: DebugTra
                         f"{old_url or '(none)'} → {new_url}"
                     )
                 elif trace:
-                    trace.step("url_finder_rejected_homepage", name=items[idx].get("name", "?"), url=new_url)
+                    trace.step("url_finder_rejected", name=items[idx].get("name", "?"), url=new_url, reason="homepage or category page")
 
         if trace:
             trace.step("url_finder_result",
                         assigned=assigned,
                         items_after=[{"name": it.get("name", "?"), "url": it.get("product_url", "")} for it in items])
 
+    except asyncio.TimeoutError:
+        logger.warning("URL finder timed out (30s)")
+        if trace:
+            trace.step("url_finder_error", error="Timeout after 30 seconds", error_type="TimeoutError")
     except Exception as e:
         logger.warning(f"URL finder failed: {e}")
         if trace:
@@ -654,21 +714,19 @@ def _build_contents(history: list[dict], user_message: str) -> list[types.Conten
     return contents
 
 
-async def chat(history: list[dict], user_message: str) -> dict:
+async def chat(history: list[dict], user_message: str, session_id: str = "") -> dict:
     """
     検証・自己補正機能を含むフロー:
     1. 生成
     2. URL検証（_verify_and_enrich）
     3. URLが無効な場合は、エラーメッセージを加えて再生成ループ（最大3回）
     """
-    trace = DebugTrace()
+    trace = DebugTrace(session_id=session_id)
     trace.step("chat_start", message_preview=user_message[:200], history_len=len(history))
 
     base_contents = _build_contents(history, user_message)
 
     last_error = None
-    MAX_VALIDATION_RETRIES = 3
-
     def _make_result(result, reply_text):
         """最終結果を構築（デバッグトレース付き）"""
         out = {
@@ -693,128 +751,110 @@ async def chat(history: list[dict], user_message: str) -> dict:
 
             contents = list(base_contents)  # コピーして使う
 
-            for attempt in range(MAX_VALIDATION_RETRIES):
-                trace.step("attempt_start", attempt=attempt + 1, max=MAX_VALIDATION_RETRIES)
-                logger.info(f"--- Attempt {attempt + 1}/{MAX_VALIDATION_RETRIES} for {model_name} ---")
+            trace.step("attempt_start", model=model_name)
+            logger.info(f"--- Generating with {model_name} ---")
 
-                response = await client.aio.models.generate_content(
-                    model=model_name,
-                    contents=contents,
-                    config=config,
+            response = await client.aio.models.generate_content(
+                model=model_name,
+                contents=contents,
+                config=config,
+            )
+
+            try:
+                reply_text = response.text
+            except (AttributeError, ValueError):
+                reply_text = "申し訳ありません。問題が発生しました。もう一度お試しください。"
+                trace.step("response_error", error="Could not extract text from response")
+                return _make_result({"reply": reply_text, "items": []}, reply_text)
+
+            trace.step("generation_done",
+                       reply_length=len(reply_text),
+                       reply_preview=reply_text[:300],
+                       has_items_delimiter="<<<ITEMS>>>" in reply_text,
+                       urls_in_text=URL_IN_TEXT_PATTERN.findall(reply_text))
+
+            logger.info(f"Response (first 200): {reply_text[:200]}")
+
+            result = parse_response(reply_text)
+            trace.step("parse_response",
+                       items_found=len(result["items"]),
+                       item_names=[it.get("name", "?") for it in result["items"]],
+                       item_urls=[it.get("product_url", "") for it in result["items"]])
+
+            # Phase 2: <<<ITEMS>>> がなく長文 → 抽出リクエスト（Search OFF）
+            if not result["items"] and len(reply_text) > 200:
+                trace.step("extraction_start", reason=f"Long response ({len(reply_text)} chars) without <<<ITEMS>>>")
+                logger.info(
+                    f"Long response ({len(reply_text)} chars) without <<<ITEMS>>>. "
+                    "Extracting items via separate request."
                 )
-
-                try:
-                    reply_text = response.text
-                except (AttributeError, ValueError):
-                    reply_text = "申し訳ありません。問題が発生しました。もう一度お試しください。"
-                    trace.step("response_error", error="Could not extract text from response")
-                    return _make_result({"reply": reply_text, "items": []}, reply_text)
-
-                trace.step("generation_done",
-                           reply_length=len(reply_text),
-                           reply_preview=reply_text[:300],
-                           has_items_delimiter="<<<ITEMS>>>" in reply_text,
-                           urls_in_text=URL_IN_TEXT_PATTERN.findall(reply_text))
-
-                logger.info(f"Response (first 200): {reply_text[:200]}")
-
-                result = parse_response(reply_text)
-                trace.step("parse_response",
+                result["items"] = await _extract_items_from_text(reply_text, model_name)
+                trace.step("extraction_done",
                            items_found=len(result["items"]),
                            item_names=[it.get("name", "?") for it in result["items"]],
                            item_urls=[it.get("product_url", "") for it in result["items"]])
 
-                # Phase 2: <<<ITEMS>>> がなく長文 → 抽出リクエスト（Search OFF）
-                if not result["items"] and len(reply_text) > 200:
-                    trace.step("extraction_start", reason=f"Long response ({len(reply_text)} chars) without <<<ITEMS>>>")
-                    logger.info(
-                        f"Long response ({len(reply_text)} chars) without <<<ITEMS>>>. "
-                        "Extracting items via separate request."
-                    )
-                    result["items"] = await _extract_items_from_text(reply_text, model_name)
-                    trace.step("extraction_done",
-                               items_found=len(result["items"]),
-                               item_names=[it.get("name", "?") for it in result["items"]],
-                               item_urls=[it.get("product_url", "") for it in result["items"]])
+            # ヒアリング中（items なし）→ テキストのみ返す
+            if not result["items"]:
+                trace.step("hearing_phase", reason="No items found - still in hearing phase")
+                logger.info("No items (hearing phase)")
+                return _make_result(result, reply_text)
 
-                # ヒアリング中（items なし）→ テキストのみ返す
-                if not result["items"]:
-                    trace.step("hearing_phase", reason="No items found - still in hearing phase")
-                    logger.info("No items (hearing phase)")
-                    return _make_result(result, reply_text)
+            # テキスト中のURLをアイテムに注入（抽出モデルが見逃した場合）
+            result["items"] = _inject_urls_from_text(result["items"], reply_text, trace)
 
-                # テキスト中のURLをアイテムに注入（抽出モデルが見逃した場合）
-                result["items"] = _inject_urls_from_text(result["items"], reply_text, trace)
+            # Phase 3: 商品ページURL探索（ホームページURLや空URLの補完）
+            result["items"] = await _find_product_urls(result["items"], model_name, trace)
 
-                # Phase 3: 商品ページURL探索（ホームページURLや空URLの補完）
-                result["items"] = await _find_product_urls(result["items"], model_name, trace)
+            # Phase 4: URL検証 + OG画像/価格抽出
+            trace.step("pre_verify",
+                       orig_urls=[{"name": it.get("name", "?"), "url": it.get("product_url", "")} for it in result["items"]])
 
-                # Phase 4: URL検証 + OG画像/価格抽出
-                trace.step("pre_verify",
-                           orig_urls=[{"name": it.get("name", "?"), "url": it.get("product_url", "")} for it in result["items"]])
+            logger.info(f"Verifying {len(result['items'])} items...")
+            enriched_items = await _verify_and_enrich(result["items"], trace)
 
-                logger.info(f"Verifying {len(result['items'])} items...")
-                enriched_items = await _verify_and_enrich(result["items"], trace)
+            # Phase 5: 検証で壊れたURLがあれば、URL Finderで再探索
+            broken_items = [
+                it for it in enriched_items
+                if not it.get("product_url") and it.get("search_keyword")
+            ]
+            if broken_items:
+                trace.step("post_verify_url_finder",
+                           reason=f"{len(broken_items)} items lost URLs after verification",
+                           items=[it.get("name", "?") for it in broken_items])
+                enriched_items = await _find_product_urls(enriched_items, model_name, trace)
 
-                # Phase 5: 検証で壊れたURLがあれば、URL Finderで再探索
-                broken_items = [
+                # 再探索で見つかったURLを再検証
+                newly_found = [
                     it for it in enriched_items
-                    if not it.get("product_url") and it.get("search_keyword")
+                    if it.get("product_url") and not it.get("url_type")
                 ]
-                if broken_items:
-                    trace.step("post_verify_url_finder",
-                               reason=f"{len(broken_items)} items lost URLs after verification",
-                               items=[it.get("name", "?") for it in broken_items])
-                    enriched_items = await _find_product_urls(enriched_items, model_name, trace)
+                if newly_found:
+                    trace.step("post_verify_recheck",
+                               count=len(newly_found),
+                               urls=[it.get("product_url", "") for it in newly_found])
+                    enriched_items = await _verify_and_enrich(enriched_items, trace)
 
-                    # 再探索で見つかったURLを再検証
-                    newly_found = [
-                        it for it in enriched_items
-                        if it.get("product_url") and not it.get("url_type")
-                    ]
-                    if newly_found:
-                        trace.step("post_verify_recheck",
-                                   count=len(newly_found),
-                                   urls=[it.get("product_url", "") for it in newly_found])
-                        enriched_items = await _verify_and_enrich(enriched_items, trace)
+            # 最終状態を記録
+            trace.step("final_state",
+                       items=[{
+                           "name": it.get("name", "?"),
+                           "url": it.get("product_url", ""),
+                           "url_type": it.get("url_type", ""),
+                           "has_image": bool(it.get("image_url")),
+                       } for it in enriched_items])
 
-                # 最終状態を記録
-                trace.step("final_state",
-                           items=[{
-                               "name": it.get("name", "?"),
-                               "url": it.get("product_url", ""),
-                               "url_type": it.get("url_type", ""),
-                               "has_image": bool(it.get("image_url")),
-                           } for it in enriched_items])
-
-                # リトライ判断: まだURLが無いアイテムがあるか
-                items_without_url = sum(
-                    1 for it in enriched_items
-                    if not it.get("product_url") and it.get("search_keyword")
-                )
-
-                if items_without_url == 0 or attempt >= MAX_VALIDATION_RETRIES - 1:
-                    # 完了（URLありorリトライ上限）
-                    result["items"] = enriched_items
-                    status = "success" if items_without_url == 0 else "max_retries_reached"
-                    trace.step("chat_done", status=status, items_without_url=items_without_url)
-                    if items_without_url > 0:
-                        logger.warning(f"Max retries reached. {items_without_url} items without URL.")
-                    return _make_result(result, reply_text)
-
-                # リトライ: モデルに再生成を依頼
-                logger.warning(f"{items_without_url} items without URL. Retrying...")
-                trace.step("retry", items_without_url=items_without_url)
-                error_msg = "システムエラー: 提案した商品のURLが確認できませんでした。別の実在する商品を探し、Google検索で実際のURLを確認してから提案し直してください。\n"
-                error_msg += "【重要】ユーザーにはこのエラーを見せません。エラーなど無かったかのように、いきなり自然な商品提案の文章から書き始めてください。"
-                contents.append(types.Content(
-                    role="model",
-                    parts=[types.Part(text=reply_text)]
-                ))
-                contents.append(types.Content(
-                    role="user",
-                    parts=[types.Part(text=error_msg)]
-                ))
+            # URL無しアイテムがあっても再生成しない（再生成は良いアイテムも捨ててしまう）
+            items_without_url = sum(
+                1 for it in enriched_items
+                if not it.get("product_url") and it.get("search_keyword")
+            )
+            result["items"] = enriched_items
+            status = "success" if items_without_url == 0 else "some_items_without_url"
+            trace.step("chat_done", status=status, items_without_url=items_without_url)
+            if items_without_url > 0:
+                logger.info(f"{items_without_url} items without URL (kept as-is, search button available)")
+            return _make_result(result, reply_text)
 
         except Exception as e:
             last_error = e

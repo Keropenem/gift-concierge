@@ -43,6 +43,12 @@ chatForm.addEventListener("submit", async (e) => {
   sendBtn.disabled = true;
   sending = true;
 
+  // デバッグモード時: ログクリア＆SSE再接続
+  if (_debugMode) {
+    clearDebugLog();
+    connectDebugSSE();
+  }
+
   const thinkingEl = addThinking(messagesEl);
 
   try {

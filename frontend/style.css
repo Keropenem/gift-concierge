@@ -571,6 +571,94 @@ footer {
   background: #34495e;
 }
 
+/* ── App wrapper (debug panel layout) ── */
+.app-wrapper {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.app-wrapper > .app {
+  flex: 1;
+  min-width: 0;
+  height: 100vh;
+}
+
+/* ── Debug side panel ── */
+.debug-panel {
+  width: 420px;
+  flex-shrink: 0;
+  background: #1e1e2e;
+  color: #cdd6f4;
+  display: flex;
+  flex-direction: column;
+  border-left: 2px solid #313244;
+  font-family: "Consolas", "Fira Code", monospace;
+  font-size: 0.75rem;
+}
+
+.debug-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #181825;
+  border-bottom: 1px solid #313244;
+  font-weight: 700;
+  font-size: 0.8rem;
+  color: #89b4fa;
+  flex-shrink: 0;
+}
+
+.debug-log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.debug-entry {
+  margin-bottom: 6px;
+  padding: 4px 6px;
+  border-left: 2px solid #45475a;
+  background: #181825;
+  border-radius: 0 4px 4px 0;
+}
+
+.debug-entry-header {
+  color: #a6e3a1;
+  font-weight: 600;
+  display: block;
+  margin-bottom: 2px;
+}
+
+.debug-entry-summary {
+  color: #6c7086;
+  font-weight: 400;
+  font-size: 0.65rem;
+}
+
+.debug-duration {
+  display: inline-block;
+  background: #f38ba8;
+  color: #1e1e2e;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0 4px;
+  border-radius: 3px;
+  margin-left: 4px;
+}
+
+.debug-entry-data {
+  color: #bac2de;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow-y: auto;
+  margin: 0;
+}
+
 /* ── Responsive ── */
 @media (max-width: 600px) {
   .app {

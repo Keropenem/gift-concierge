@@ -1,3 +1,5 @@
+import asyncio
+import json
 import logging
 import time
 import uuid
@@ -9,8 +11,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from sse_starlette.sse import EventSourceResponse
 
-from .gemini_client import chat, set_debug_mode
+from .gemini_client import chat, set_debug_mode, subscribe_debug, unsubscribe_debug
 from . import gemini_client as _gc
 from .prompts import GREETING
 
@@ -66,7 +69,7 @@ async def api_chat(request: ChatRequest, raw_request: Request):
     logger.info(f"[{session_id[:8]}] User: {request.message[:100]}")
 
     try:
-        result = await chat(session["history"], request.message)
+        result = await chat(session["history"], request.message, session_id=session_id)
 
         # 会話履歴に追加
         session["history"].append({"role": "user", "parts": [request.message]})
@@ -115,6 +118,36 @@ async def api_debug_toggle():
     set_debug_mode(not _gc.DEBUG_MODE)
     logger.info(f"Debug mode: {'ON' if _gc.DEBUG_MODE else 'OFF'}")
     return {"debug": _gc.DEBUG_MODE}
+
+
+@app.get("/api/debug/stream")
+async def api_debug_stream(raw_request: Request):
+    """SSEでリアルタイムデバッグイベントをストリーミング"""
+    session_id = raw_request.query_params.get("session_id", "")
+    if not session_id:
+        return {"error": "session_id required"}
+
+    q = subscribe_debug(session_id)
+
+    async def event_generator():
+        try:
+            while True:
+                # クライアント切断チェック
+                if await raw_request.is_disconnected():
+                    break
+                try:
+                    entry = await asyncio.wait_for(q.get(), timeout=30)
+                    yield {
+                        "event": "debug",
+                        "data": json.dumps(entry, ensure_ascii=False, default=str),
+                    }
+                except asyncio.TimeoutError:
+                    # keepalive
+                    yield {"event": "ping", "data": ""}
+        finally:
+            unsubscribe_debug(session_id)
+
+    return EventSourceResponse(event_generator())
 
 
 FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
