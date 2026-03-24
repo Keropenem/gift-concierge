@@ -338,6 +338,102 @@ def _inject_urls_from_text(items: list[dict], raw_text: str) -> list[dict]:
     return items
 
 
+URL_FINDER_PROMPT = """以下の各商品について、商品の詳細ページ（購入ページ）のURLを見つけてください。
+
+ルール:
+- ブランドのトップページやホームページではなく、その商品そのもののページを見つけること
+- 優先順位: 公式オンラインショップの商品ページ > 楽天/Amazon等の個別商品ページ > レビュー記事
+- ブランドのトップページ（例: https://brand.com/ ）は絶対に出すな
+- 各商品につき1行、URLだけを出力。余計な説明は不要。
+- 見つからなければ「NOT_FOUND」と出力
+
+商品リスト:
+"""
+
+
+def _is_homepage_url(url: str) -> bool:
+    """URLがトップページ/ホームページかどうかを判定する"""
+    if not url:
+        return True
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    path = parsed.path.rstrip("/")
+    # パスが空、または /en, /ja のような短い言語コードのみ
+    if not path or len(path) <= 3:
+        return True
+    return False
+
+
+async def _find_product_urls(items: list[dict], model_name: str) -> list[dict]:
+    """
+    各商品の名前・ブランドを使って、Google Searchで商品詳細ページのURLを探す。
+    ホームページURLしかない、またはURLが空のアイテムが対象。
+    """
+    targets = []
+    target_indices = []
+    for i, item in enumerate(items):
+        url = item.get("product_url", "")
+        if not url or _is_homepage_url(url):
+            name = item.get("name", "")
+            keyword = item.get("search_keyword", name)
+            if keyword:
+                targets.append(keyword)
+                target_indices.append(i)
+
+    if not targets:
+        return items
+
+    query = URL_FINDER_PROMPT
+    for j, keyword in enumerate(targets, 1):
+        query += f"{j}. {keyword}\n"
+
+    logger.info(f"Finding product URLs for {len(targets)} items...")
+
+    try:
+        response = await client.aio.models.generate_content(
+            model=model_name,
+            contents=[
+                types.Content(
+                    role="user",
+                    parts=[types.Part(text=query)],
+                )
+            ],
+            config=types.GenerateContentConfig(
+                temperature=0.1,
+                tools=[GOOGLE_SEARCH_TOOL],
+            ),
+        )
+        result_text = response.text
+        logger.info(f"URL finder response: {result_text[:500]}")
+
+        # レスポンスからURLを行ごとに抽出
+        lines = [line.strip() for line in result_text.strip().split("\n") if line.strip()]
+        found_urls = []
+        for line in lines:
+            urls_in_line = URL_IN_TEXT_PATTERN.findall(line)
+            if urls_in_line:
+                found_urls.append(urls_in_line[0])
+            elif "NOT_FOUND" in line:
+                found_urls.append("")
+
+        # 見つかったURLをアイテムに割り当て
+        for j, idx in enumerate(target_indices):
+            if j < len(found_urls) and found_urls[j]:
+                old_url = items[idx].get("product_url", "")
+                new_url = found_urls[j]
+                if not _is_homepage_url(new_url):
+                    items[idx]["product_url"] = new_url
+                    logger.info(
+                        f"URL finder: {items[idx].get('name', '?')}: "
+                        f"{old_url or '(none)'} → {new_url}"
+                    )
+
+    except Exception as e:
+        logger.warning(f"URL finder failed: {e}")
+
+    return items
+
+
 EXTRACTION_PROMPT = """以下のギフト提案テキストから商品情報を抽出し、JSON配列として出力してください。
 
 出力ルール:
@@ -481,7 +577,10 @@ async def chat(history: list[dict], user_message: str) -> dict:
                 # テキスト中のURLをアイテムに注入（抽出モデルが見逃した場合）
                 result["items"] = _inject_urls_from_text(result["items"], reply_text)
 
-                # Phase 3: URL検証 + OG画像/価格抽出
+                # Phase 3: 商品ページURL探索（ホームページURLや空URLの補完）
+                result["items"] = await _find_product_urls(result["items"], model_name)
+
+                # Phase 4: URL検証 + OG画像/価格抽出
                 # ※ _verify_and_enrich はin-place修正するので、先にオリジナルURLを保存
                 orig_urls = [item.get("product_url", "") for item in result["items"]]
 

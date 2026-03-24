@@ -14,39 +14,59 @@ localStorage.setItem("gc-session-form", sessionId);
 
 let sending = false;
 
-// 海外選択時に国名フィールド表示
-document.getElementById("location").addEventListener("change", (e) => {
-  document.getElementById("country-row").style.display =
-    e.target.value === "海外" ? "" : "none";
+// 「その他」選択時に自由記載欄を表示
+document.getElementById("relationship").addEventListener("change", (e) => {
+  document.getElementById("relationship-other").style.display =
+    e.target.value === "その他" ? "" : "none";
+});
+
+document.getElementById("occasion").addEventListener("change", (e) => {
+  document.getElementById("occasion-other").style.display =
+    e.target.value === "その他" ? "" : "none";
+});
+
+// 予算：選択肢と自由入力を排他的にする
+document.getElementById("budget-select").addEventListener("change", (e) => {
+  if (e.target.value) document.getElementById("budget-free").value = "";
+});
+document.getElementById("budget-free").addEventListener("input", (e) => {
+  if (e.target.value) document.getElementById("budget-select").value = "";
 });
 
 // フォーム送信 → チャットに遷移
 giftForm.addEventListener("submit", async (e) => {
   e.preventDefault();
 
-  const relationship = document.getElementById("relationship").value;
+  let relationship = document.getElementById("relationship").value;
+  if (relationship === "その他") {
+    const other = document.getElementById("relationship-other").value.trim();
+    relationship = other || "その他";
+  }
+
   const gender = document.querySelector('input[name="gender"]:checked')?.value || "";
   const age = document.getElementById("age").value;
-  const budget = document.getElementById("budget").value;
-  const location = document.getElementById("location").value;
-  const country = document.getElementById("country").value.trim();
+
+  let occasion = document.getElementById("occasion").value;
+  if (occasion === "その他") {
+    const other = document.getElementById("occasion-other").value.trim();
+    occasion = other || "その他";
+  }
+  const occasionContext = document.getElementById("occasion-context").value.trim();
+
+  const budgetSelect = document.getElementById("budget-select").value;
+  const budgetFree = document.getElementById("budget-free").value.trim();
+  const budget = budgetFree
+    ? `${Number(budgetFree).toLocaleString()}円くらい`
+    : budgetSelect;
+
+  if (!budget) {
+    alert("予算を選択または入力してください");
+    return;
+  }
+
   const recipientDetail = document.getElementById("recipient-detail").value.trim();
   const senderDetail = document.getElementById("sender-detail").value.trim();
   const situation = document.getElementById("situation").value.trim();
-
-  const locationText = location === "海外" && country ? `海外（${country}）` : location;
-
-  // 構造化 + 自由テキストを1メッセージに変換
-  const parts = [
-    `【相手】${relationship}`,
-    gender ? `${gender}` : "",
-    age ? `${age}` : "",
-    `【予算】${budget}`,
-    `【購入場所】${locationText}`,
-    recipientDetail ? `【相手の人物像】${recipientDetail}` : "",
-    senderDetail ? `【自分について】${senderDetail}` : "",
-    situation ? `【きっかけ・気持ち】${situation}` : "",
-  ].filter(Boolean);
 
   // 相手の基本情報をまとめる
   const line1Parts = [relationship];
@@ -54,11 +74,11 @@ giftForm.addEventListener("submit", async (e) => {
   if (gender && gender !== "未回答") line1Parts.push(gender);
   const message = [
     `【相手】${line1Parts.join("の")}`,
+    `【目的】${occasion}${occasionContext ? "（" + occasionContext + "）" : ""}`,
     `【予算】${budget}`,
-    `【購入場所】${locationText}`,
     recipientDetail ? `【相手の人物像】${recipientDetail}` : "",
     senderDetail ? `【自分について】${senderDetail}` : "",
-    situation ? `【きっかけ・気持ち】${situation}` : "",
+    situation ? `【伝えたい気持ち】${situation}` : "",
   ].filter(Boolean).join("\n\n");
 
   // フォーム非表示 → チャット表示
@@ -148,5 +168,6 @@ resetBtn.addEventListener("click", async () => {
   chatFooter.style.display = "none";
   formPhase.style.display = "";
   giftForm.reset();
-  document.getElementById("country-row").style.display = "none";
+  document.getElementById("relationship-other").style.display = "none";
+  document.getElementById("occasion-other").style.display = "none";
 });

@@ -30,9 +30,10 @@
                 <option value="恋人">恋人</option>
                 <option value="同僚">同僚</option>
                 <option value="上司">上司</option>
-                <option value="メンター">メンター</option>
                 <option value="その他">その他</option>
               </select>
+              <input type="text" id="relationship-other" class="other-input"
+                     placeholder="具体的に（例: 恩師、主治医、義母など）" style="display:none;">
             </div>
 
             <div class="form-row">
@@ -59,28 +60,43 @@
             </div>
 
             <div class="form-row">
-              <label for="budget">予算</label>
-              <select id="budget" required>
+              <label for="occasion">何のための贈り物？</label>
+              <select id="occasion" required>
                 <option value="">選択してください</option>
-                <option value="〜3,000円">〜3,000円</option>
-                <option value="〜5,000円">〜5,000円</option>
-                <option value="〜10,000円">〜10,000円</option>
-                <option value="〜30,000円">〜30,000円</option>
-                <option value="30,000円以上">30,000円以上</option>
+                <option value="誕生日">誕生日</option>
+                <option value="結婚祝い">結婚祝い</option>
+                <option value="出産祝い">出産祝い</option>
+                <option value="お礼・感謝">お礼・感謝</option>
+                <option value="送別・引越し">送別・引越し</option>
+                <option value="クリスマス">クリスマス</option>
+                <option value="バレンタイン/ホワイトデー">バレンタイン/ホワイトデー</option>
+                <option value="お土産">旅行のお土産</option>
+                <option value="就職・昇進祝い">就職・昇進祝い</option>
+                <option value="その他">その他</option>
               </select>
+              <input type="text" id="occasion-other" class="other-input"
+                     placeholder="具体的に（例: 退院祝い、記念日など）" style="display:none;">
+              <textarea id="occasion-context" rows="2" class="occasion-context"
+                        placeholder="例: オーストラリア旅行のお土産として / 3年ぶりに会う友人に / 転職する同僚の送別会で"></textarea>
             </div>
 
             <div class="form-row">
-              <label for="location">購入場所</label>
-              <select id="location">
-                <option value="日本国内">日本国内</option>
-                <option value="海外">海外のお土産</option>
-              </select>
-            </div>
-
-            <div class="form-row" id="country-row" style="display:none;">
-              <label for="country">国名</label>
-              <input type="text" id="country" placeholder="例: オーストラリア">
+              <label for="budget">予算</label>
+              <div class="budget-group">
+                <select id="budget-select">
+                  <option value="">目安を選ぶ</option>
+                  <option value="〜3,000円">〜3,000円</option>
+                  <option value="〜5,000円">〜5,000円</option>
+                  <option value="〜10,000円">〜10,000円</option>
+                  <option value="〜30,000円">〜30,000円</option>
+                  <option value="30,000円以上">30,000円以上</option>
+                </select>
+                <div class="budget-free">
+                  <span class="budget-or">または</span>
+                  <input type="number" id="budget-free" placeholder="金額を入力" min="0" step="1000">
+                  <span class="budget-unit">円くらい</span>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -99,9 +115,9 @@
             </div>
 
             <div class="form-row">
-              <label for="situation">贈り物のきっかけ・伝えたい気持ち</label>
+              <label for="situation">伝えたい気持ち・エピソード</label>
               <textarea id="situation" rows="3"
-                        placeholder="シチュエーション、エピソード、届けたい想いなど"></textarea>
+                        placeholder="どんな気持ちを届けたいか、二人の間のエピソードなど"></textarea>
             </div>
           </div>
 
