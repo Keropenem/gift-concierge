@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gift Concierge - チャット</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>Gift Concierge</h1>
+      <button id="reset-btn" title="新しい相談">新しい相談</button>
+    </header>
+
+    <main id="messages" class="messages"></main>
+
+    <footer>
+      <form id="chat-form">
+        <div class="input-row">
+          <textarea id="user-input" rows="1" placeholder="メッセージを入力..."
+                    maxlength="1000" autocomplete="off"></textarea>
+          <button type="submit" id="send-btn" disabled>
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+            </svg>
+          </button>
+        </div>
+      </form>
+    </footer>
+  </div>
+
+  <script src="shared.js"></script>
+  <script src="chat.js"></script>
+</body>
+</html>

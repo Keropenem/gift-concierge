@@ -7,29 +7,23 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="app">
-    <header>
-      <h1>Gift Concierge</h1>
-      <button id="reset-btn" title="新しい相談">新しい相談</button>
-    </header>
+  <div class="landing">
+    <h1>Gift Concierge</h1>
+    <p class="landing-subtitle">大切な人へ、最高の贈り物を。</p>
 
-    <main id="messages" class="messages"></main>
+    <div class="landing-options">
+      <a href="/chat" class="landing-card">
+        <div class="landing-icon">💬</div>
+        <div class="landing-card-title">チャットで相談する</div>
+        <div class="landing-card-desc">コンシェルジュと会話しながら、ぴったりのギフトを一緒に見つけましょう。</div>
+      </a>
 
-    <footer>
-      <form id="chat-form">
-        <div class="input-row">
-          <textarea id="user-input" rows="1" placeholder="メッセージを入力..."
-                    maxlength="1000" autocomplete="off"></textarea>
-          <button type="submit" id="send-btn" disabled>
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
-            </svg>
-          </button>
-        </div>
-      </form>
-    </footer>
+      <a href="/form" class="landing-card">
+        <div class="landing-icon">📝</div>
+        <div class="landing-card-title">フォームで情報を入力する</div>
+        <div class="landing-card-desc">相手やシチュエーションの情報をまとめて入力し、すぐに提案を受け取れます。</div>
+      </a>
+    </div>
   </div>
-
-  <script src="script.js"></script>
 </body>
 </html>
