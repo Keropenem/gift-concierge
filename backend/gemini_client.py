@@ -750,63 +750,71 @@ async def chat(history: list[dict], user_message: str) -> dict:
                 result["items"] = await _find_product_urls(result["items"], model_name, trace)
 
                 # Phase 4: URL検証 + OG画像/価格抽出
-                # ※ _verify_and_enrich はin-place修正するので、先にオリジナルURLを保存
-                orig_urls = [item.get("product_url", "") for item in result["items"]]
                 trace.step("pre_verify",
                            orig_urls=[{"name": it.get("name", "?"), "url": it.get("product_url", "")} for it in result["items"]])
 
                 logger.info(f"Verifying {len(result['items'])} items...")
                 enriched_items = await _verify_and_enrich(result["items"], trace)
 
-                # 確認: 検証で弾かれた（URLがあったのに空にされた）アイテムだけをカウント
-                # URL finder でも見つからなかった（元々空）ものはリトライ対象にしない
-                broken_count = 0
-                no_url_count = 0
-                error_msg = ""
-                for orig_url, enriched in zip(orig_urls, enriched_items):
-                    final_url = enriched.get("product_url", "")
-                    if not orig_url and not final_url:
-                        no_url_count += 1
-                    elif orig_url and not final_url:
-                        broken_count += 1
-                        error_msg = f"システムエラー: 前回提案したURL ({orig_url}) はリンク切れかアクセス不可（404等）でした。別の実在する商品を探すか、正しいURLを見つけて、最初から提案し直してください。\n"
-                        error_msg += "【重要】ユーザーにはこのエラーを見せません。新しい文章の冒頭で絶対に謝罪したり、システムエラーについて言及したりしないでください。エラーなど無かったかのように、いきなり自然な商品提案の文章（導入部分）から書き始めてください。"
+                # Phase 5: 検証で壊れたURLがあれば、URL Finderで再探索
+                broken_items = [
+                    it for it in enriched_items
+                    if not it.get("product_url") and it.get("search_keyword")
+                ]
+                if broken_items:
+                    trace.step("post_verify_url_finder",
+                               reason=f"{len(broken_items)} items lost URLs after verification",
+                               items=[it.get("name", "?") for it in broken_items])
+                    enriched_items = await _find_product_urls(enriched_items, model_name, trace)
 
-                trace.step("retry_decision",
-                           broken_count=broken_count,
-                           no_url_count=no_url_count,
-                           total_items=len(enriched_items),
-                           will_retry=broken_count > 0 and attempt < MAX_VALIDATION_RETRIES - 1,
-                           final_items=[{
+                    # 再探索で見つかったURLを再検証
+                    newly_found = [
+                        it for it in enriched_items
+                        if it.get("product_url") and not it.get("url_type")
+                    ]
+                    if newly_found:
+                        trace.step("post_verify_recheck",
+                                   count=len(newly_found),
+                                   urls=[it.get("product_url", "") for it in newly_found])
+                        enriched_items = await _verify_and_enrich(enriched_items, trace)
+
+                # 最終状態を記録
+                trace.step("final_state",
+                           items=[{
                                "name": it.get("name", "?"),
                                "url": it.get("product_url", ""),
                                "url_type": it.get("url_type", ""),
                                "has_image": bool(it.get("image_url")),
                            } for it in enriched_items])
 
-                if broken_count == 0:
-                    # 全て検証成功（URLが無かったものはそのまま）
+                # リトライ判断: まだURLが無いアイテムがあるか
+                items_without_url = sum(
+                    1 for it in enriched_items
+                    if not it.get("product_url") and it.get("search_keyword")
+                )
+
+                if items_without_url == 0 or attempt >= MAX_VALIDATION_RETRIES - 1:
+                    # 完了（URLありorリトライ上限）
                     result["items"] = enriched_items
-                    trace.step("chat_done", status="success")
+                    status = "success" if items_without_url == 0 else "max_retries_reached"
+                    trace.step("chat_done", status=status, items_without_url=items_without_url)
+                    if items_without_url > 0:
+                        logger.warning(f"Max retries reached. {items_without_url} items without URL.")
                     return _make_result(result, reply_text)
 
-                if attempt < MAX_VALIDATION_RETRIES - 1:
-                    logger.warning(f"Found {broken_count} broken URLs. Retrying: {error_msg}")
-                    trace.step("retry", broken_count=broken_count, error_msg=error_msg[:200])
-                    # ユーザーには見せず、システムからAIへ修正要求
-                    contents.append(types.Content(
-                        role="model",
-                        parts=[types.Part(text=reply_text)]
-                    ))
-                    contents.append(types.Content(
-                        role="user",
-                        parts=[types.Part(text=error_msg)]
-                    ))
-                else:
-                    logger.warning("Max validation retries reached. Returning gracefully.")
-                    result["items"] = enriched_items
-                    trace.step("chat_done", status="max_retries_reached")
-                    return _make_result(result, reply_text)
+                # リトライ: モデルに再生成を依頼
+                logger.warning(f"{items_without_url} items without URL. Retrying...")
+                trace.step("retry", items_without_url=items_without_url)
+                error_msg = "システムエラー: 提案した商品のURLが確認できませんでした。別の実在する商品を探し、Google検索で実際のURLを確認してから提案し直してください。\n"
+                error_msg += "【重要】ユーザーにはこのエラーを見せません。エラーなど無かったかのように、いきなり自然な商品提案の文章から書き始めてください。"
+                contents.append(types.Content(
+                    role="model",
+                    parts=[types.Part(text=reply_text)]
+                ))
+                contents.append(types.Content(
+                    role="user",
+                    parts=[types.Part(text=error_msg)]
+                ))
 
         except Exception as e:
             last_error = e
