@@ -99,7 +99,7 @@ giftForm.addEventListener("submit", async (e) => {
       localStorage.setItem("gc-session-form", sessionId);
     }
 
-    addMessage(chatPhase, "ai", data.reply, data.items);
+    addMessage(chatPhase, "ai", data.reply, data.items, data._debug);
   } catch (err) {
     thinkingEl.remove();
     addMessage(chatPhase, "error", err.message);
@@ -146,7 +146,7 @@ chatForm.addEventListener("submit", async (e) => {
       localStorage.setItem("gc-session-form", sessionId);
     }
 
-    addMessage(chatPhase, "ai", data.reply, data.items);
+    addMessage(chatPhase, "ai", data.reply, data.items, data._debug);
   } catch (err) {
     thinkingEl.remove();
     addMessage(chatPhase, "error", err.message);

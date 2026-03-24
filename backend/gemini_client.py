@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import time as _time
 from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
@@ -20,6 +21,34 @@ api_key = os.getenv("GEMINI_API_KEY")
 logger.info(f"API key loaded: {'Yes' if api_key else 'No'}")
 
 client = genai.Client(api_key=api_key)
+
+# ── デバッグモード ──
+DEBUG_MODE = os.getenv("GC_DEBUG", "0") == "1"
+
+
+def set_debug_mode(enabled: bool):
+    global DEBUG_MODE
+    DEBUG_MODE = enabled
+
+
+class DebugTrace:
+    """パイプラインの各ステップを記録するデバッグトレーサー"""
+
+    def __init__(self):
+        self.steps: list[dict] = []
+        self._start_time = _time.time()
+
+    def step(self, name: str, **data):
+        """ステップを記録"""
+        elapsed = round(_time.time() - self._start_time, 2)
+        entry = {"step": name, "elapsed_sec": elapsed, **data}
+        self.steps.append(entry)
+        if DEBUG_MODE:
+            # ログにも出力
+            logger.info(f"[DEBUG TRACE] {name}: {json.dumps(data, ensure_ascii=False, default=str)[:500]}")
+
+    def to_dict(self) -> list[dict]:
+        return self.steps
 
 MODEL_CANDIDATES = [
     "gemini-3-flash-preview",
@@ -281,7 +310,7 @@ async def verify_product_url(url: str) -> dict:
     return await asyncio.to_thread(_verify_url_sync, url)
 
 
-async def _verify_and_enrich(items: list[dict]) -> list[dict]:
+async def _verify_and_enrich(items: list[dict], trace: DebugTrace = None) -> list[dict]:
     """
     全商品URLを並行検証し、OG画像と実価格をセットする。
     検証失敗でもアイテムは消さない（product_urlを空にするだけ）。
@@ -295,17 +324,35 @@ async def _verify_and_enrich(items: list[dict]) -> list[dict]:
             tasks.append(verify_product_url(url))
             has_url.append(i)
 
+    if trace:
+        trace.step("verify_start",
+                    items_with_url=len(has_url),
+                    urls_to_verify=[{"idx": i, "name": items[i].get("name", "?"), "url": items[i].get("product_url", "")} for i in has_url])
+
     if not tasks:
+        if trace:
+            trace.step("verify_skip", reason="No items have URLs to verify")
         return items
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
+    verify_details = []
     for idx, result in zip(has_url, results):
         item = items[idx]
+        detail = {"name": item.get("name", "?"), "original_url": item.get("product_url", "")}
+
         if isinstance(result, Exception):
             logger.warning(f"URL verification error for {item.get('name', '?')}: {result}")
             item["product_url"] = ""
+            detail["result"] = "exception"
+            detail["error"] = str(result)[:200]
+            verify_details.append(detail)
             continue
+
+        detail["accessible"] = result.get("accessible")
+        detail["status_code"] = result.get("status_code")
+        detail["final_url"] = result.get("final_url", "")
+        detail["is_product_page"] = result.get("is_product_page")
 
         if result.get("accessible"):
             # OG画像
@@ -316,6 +363,7 @@ async def _verify_and_enrich(items: list[dict]) -> list[dict]:
             if result.get("is_product_page"):
                 # 商品ページ確認OK
                 item["url_type"] = "product"
+                detail["result"] = "product_page"
                 actual_price = result.get("price")
                 if actual_price:
                     item["actual_price"] = actual_price
@@ -323,6 +371,7 @@ async def _verify_and_enrich(items: list[dict]) -> list[dict]:
                     item["actual_currency"] = result.get("currency", "")
                     item["price_min"] = int(actual_price)
                     item["price_max"] = int(result.get("high_price") or actual_price)
+                    detail["price"] = actual_price
                     logger.info(
                         f"Price update for {item.get('name', '?')}: "
                         f"{actual_price} {result.get('currency', '')}"
@@ -330,30 +379,42 @@ async def _verify_and_enrich(items: list[dict]) -> list[dict]:
             else:
                 # アクセスできるがホームページ等 → 公式サイトとして残す
                 item["url_type"] = "official"
+                detail["result"] = "official_site"
                 logger.info(
                     f"Homepage URL for {item.get('name', '?')}: "
                     f"{item.get('product_url', '')} → keeping as official site"
                 )
         else:
             # アクセス不可 → URLを消す
+            detail["result"] = "inaccessible"
+            detail["error"] = result.get("error", "")
             logger.info(
                 f"Inaccessible URL for {item.get('name', '?')}: "
                 f"{item.get('product_url', '')} → clearing URL"
             )
             item["product_url"] = ""
 
+        verify_details.append(detail)
+
+    if trace:
+        trace.step("verify_result",
+                    details=verify_details,
+                    items_after=[{
+                        "name": it.get("name", "?"),
+                        "url": it.get("product_url", ""),
+                        "url_type": it.get("url_type", ""),
+                    } for it in items])
+
     return items
 
 
-def _inject_urls_from_text(items: list[dict], raw_text: str) -> list[dict]:
+def _inject_urls_from_text(items: list[dict], raw_text: str, trace: DebugTrace = None) -> list[dict]:
     """
     モデルのテキストからURLを正規表現で抽出し、URLが空のアイテムに注入する。
     Google Search grounding 有効時、モデルはテキスト中に実URLを含むことがある。
     抽出モデル(Phase 2)がこれを拾い損ねた場合のフォールバック。
     """
     urls = URL_IN_TEXT_PATTERN.findall(raw_text)
-    if not urls:
-        return items
 
     # Google検索リダイレクトやGemini内部URLは除外
     product_urls = [
@@ -363,6 +424,9 @@ def _inject_urls_from_text(items: list[dict], raw_text: str) -> list[dict]:
         and "googleapis.com" not in u
     ]
 
+    if trace:
+        trace.step("url_injection", raw_urls_found=len(urls), filtered_urls=product_urls)
+
     if not product_urls:
         return items
 
@@ -370,11 +434,16 @@ def _inject_urls_from_text(items: list[dict], raw_text: str) -> list[dict]:
 
     # URLが空のアイテムに順番に割り当て
     url_idx = 0
+    injected = []
     for item in items:
         if not item.get("product_url") and url_idx < len(product_urls):
             item["product_url"] = product_urls[url_idx]
+            injected.append({"name": item.get("name", "?"), "url": product_urls[url_idx]})
             logger.info(f"Injected URL for {item.get('name', '?')}: {product_urls[url_idx]}")
             url_idx += 1
+
+    if trace and injected:
+        trace.step("url_injection_result", injected=injected)
 
     return items
 
@@ -405,7 +474,7 @@ def _is_homepage_url(url: str) -> bool:
     return False
 
 
-async def _find_product_urls(items: list[dict], model_name: str) -> list[dict]:
+async def _find_product_urls(items: list[dict], model_name: str, trace: DebugTrace = None) -> list[dict]:
     """
     各商品の名前・ブランドを使って、Google Searchで商品詳細ページのURLを探す。
     ホームページURLしかない、またはURLが空のアイテムが対象。
@@ -421,7 +490,15 @@ async def _find_product_urls(items: list[dict], model_name: str) -> list[dict]:
                 targets.append(keyword)
                 target_indices.append(i)
 
+    if trace:
+        trace.step("url_finder_start",
+                    target_count=len(targets),
+                    targets=[{"idx": idx, "keyword": kw} for idx, kw in zip(target_indices, targets)],
+                    items_before=[{"name": it.get("name", "?"), "url": it.get("product_url", "")} for it in items])
+
     if not targets:
+        if trace:
+            trace.step("url_finder_skip", reason="No targets (all items have product URLs)")
         return items
 
     query = URL_FINDER_PROMPT
@@ -447,6 +524,9 @@ async def _find_product_urls(items: list[dict], model_name: str) -> list[dict]:
         result_text = response.text
         logger.info(f"URL finder response: {result_text[:500]}")
 
+        if trace:
+            trace.step("url_finder_response", raw_response=result_text[:1000])
+
         # レスポンスからURLを行ごとに抽出
         lines = [line.strip() for line in result_text.strip().split("\n") if line.strip()]
         found_urls = []
@@ -457,20 +537,35 @@ async def _find_product_urls(items: list[dict], model_name: str) -> list[dict]:
             elif "NOT_FOUND" in line:
                 found_urls.append("")
 
+        if trace:
+            trace.step("url_finder_parsed", lines=lines, found_urls=found_urls)
+
         # 見つかったURLをアイテムに割り当て
+        assigned = []
         for j, idx in enumerate(target_indices):
             if j < len(found_urls) and found_urls[j]:
                 old_url = items[idx].get("product_url", "")
                 new_url = found_urls[j]
-                if not _is_homepage_url(new_url):
+                is_home = _is_homepage_url(new_url)
+                if not is_home:
                     items[idx]["product_url"] = new_url
+                    assigned.append({"name": items[idx].get("name", "?"), "old": old_url or "(none)", "new": new_url})
                     logger.info(
                         f"URL finder: {items[idx].get('name', '?')}: "
                         f"{old_url or '(none)'} → {new_url}"
                     )
+                elif trace:
+                    trace.step("url_finder_rejected_homepage", name=items[idx].get("name", "?"), url=new_url)
+
+        if trace:
+            trace.step("url_finder_result",
+                        assigned=assigned,
+                        items_after=[{"name": it.get("name", "?"), "url": it.get("product_url", "")} for it in items])
 
     except Exception as e:
         logger.warning(f"URL finder failed: {e}")
+        if trace:
+            trace.step("url_finder_error", error=str(e), error_type=type(e).__name__)
 
     return items
 
@@ -566,13 +661,28 @@ async def chat(history: list[dict], user_message: str) -> dict:
     2. URL検証（_verify_and_enrich）
     3. URLが無効な場合は、エラーメッセージを加えて再生成ループ（最大3回）
     """
+    trace = DebugTrace()
+    trace.step("chat_start", message_preview=user_message[:200], history_len=len(history))
+
     base_contents = _build_contents(history, user_message)
 
     last_error = None
     MAX_VALIDATION_RETRIES = 3
 
+    def _make_result(result, reply_text):
+        """最終結果を構築（デバッグトレース付き）"""
+        out = {
+            **result,
+            "reply": _clean_reply_text(result["reply"]),
+            "raw_reply": reply_text,
+        }
+        if DEBUG_MODE:
+            out["_debug"] = trace.to_dict()
+        return out
+
     for model_name in MODEL_CANDIDATES:
         try:
+            trace.step("model_try", model=model_name)
             logger.info(f"Trying model: {model_name}")
 
             config = types.GenerateContentConfig(
@@ -584,6 +694,7 @@ async def chat(history: list[dict], user_message: str) -> dict:
             contents = list(base_contents)  # コピーして使う
 
             for attempt in range(MAX_VALIDATION_RETRIES):
+                trace.step("attempt_start", attempt=attempt + 1, max=MAX_VALIDATION_RETRIES)
                 logger.info(f"--- Attempt {attempt + 1}/{MAX_VALIDATION_RETRIES} for {model_name} ---")
 
                 response = await client.aio.models.generate_content(
@@ -596,57 +707,92 @@ async def chat(history: list[dict], user_message: str) -> dict:
                     reply_text = response.text
                 except (AttributeError, ValueError):
                     reply_text = "申し訳ありません。問題が発生しました。もう一度お試しください。"
-                    return {"reply": reply_text, "items": [], "raw_reply": reply_text}
+                    trace.step("response_error", error="Could not extract text from response")
+                    return _make_result({"reply": reply_text, "items": []}, reply_text)
+
+                trace.step("generation_done",
+                           reply_length=len(reply_text),
+                           reply_preview=reply_text[:300],
+                           has_items_delimiter="<<<ITEMS>>>" in reply_text,
+                           urls_in_text=URL_IN_TEXT_PATTERN.findall(reply_text))
 
                 logger.info(f"Response (first 200): {reply_text[:200]}")
 
                 result = parse_response(reply_text)
+                trace.step("parse_response",
+                           items_found=len(result["items"]),
+                           item_names=[it.get("name", "?") for it in result["items"]],
+                           item_urls=[it.get("product_url", "") for it in result["items"]])
 
                 # Phase 2: <<<ITEMS>>> がなく長文 → 抽出リクエスト（Search OFF）
                 if not result["items"] and len(reply_text) > 200:
+                    trace.step("extraction_start", reason=f"Long response ({len(reply_text)} chars) without <<<ITEMS>>>")
                     logger.info(
                         f"Long response ({len(reply_text)} chars) without <<<ITEMS>>>. "
                         "Extracting items via separate request."
                     )
                     result["items"] = await _extract_items_from_text(reply_text, model_name)
+                    trace.step("extraction_done",
+                               items_found=len(result["items"]),
+                               item_names=[it.get("name", "?") for it in result["items"]],
+                               item_urls=[it.get("product_url", "") for it in result["items"]])
 
                 # ヒアリング中（items なし）→ テキストのみ返す
                 if not result["items"]:
+                    trace.step("hearing_phase", reason="No items found - still in hearing phase")
                     logger.info("No items (hearing phase)")
-                    return {**result, "reply": _clean_reply_text(result["reply"]), "raw_reply": reply_text}
+                    return _make_result(result, reply_text)
 
                 # テキスト中のURLをアイテムに注入（抽出モデルが見逃した場合）
-                result["items"] = _inject_urls_from_text(result["items"], reply_text)
+                result["items"] = _inject_urls_from_text(result["items"], reply_text, trace)
 
                 # Phase 3: 商品ページURL探索（ホームページURLや空URLの補完）
-                result["items"] = await _find_product_urls(result["items"], model_name)
+                result["items"] = await _find_product_urls(result["items"], model_name, trace)
 
                 # Phase 4: URL検証 + OG画像/価格抽出
                 # ※ _verify_and_enrich はin-place修正するので、先にオリジナルURLを保存
                 orig_urls = [item.get("product_url", "") for item in result["items"]]
+                trace.step("pre_verify",
+                           orig_urls=[{"name": it.get("name", "?"), "url": it.get("product_url", "")} for it in result["items"]])
 
                 logger.info(f"Verifying {len(result['items'])} items...")
-                enriched_items = await _verify_and_enrich(result["items"])
+                enriched_items = await _verify_and_enrich(result["items"], trace)
 
                 # 確認: 検証で弾かれた（URLがあったのに空にされた）アイテムだけをカウント
                 # URL finder でも見つからなかった（元々空）ものはリトライ対象にしない
                 broken_count = 0
+                no_url_count = 0
                 error_msg = ""
                 for orig_url, enriched in zip(orig_urls, enriched_items):
                     final_url = enriched.get("product_url", "")
-                    # 元々URLがあったのに検証で消された場合のみリトライ対象
-                    if orig_url and not final_url:
+                    if not orig_url and not final_url:
+                        no_url_count += 1
+                    elif orig_url and not final_url:
                         broken_count += 1
                         error_msg = f"システムエラー: 前回提案したURL ({orig_url}) はリンク切れかアクセス不可（404等）でした。別の実在する商品を探すか、正しいURLを見つけて、最初から提案し直してください。\n"
                         error_msg += "【重要】ユーザーにはこのエラーを見せません。新しい文章の冒頭で絶対に謝罪したり、システムエラーについて言及したりしないでください。エラーなど無かったかのように、いきなり自然な商品提案の文章（導入部分）から書き始めてください。"
 
+                trace.step("retry_decision",
+                           broken_count=broken_count,
+                           no_url_count=no_url_count,
+                           total_items=len(enriched_items),
+                           will_retry=broken_count > 0 and attempt < MAX_VALIDATION_RETRIES - 1,
+                           final_items=[{
+                               "name": it.get("name", "?"),
+                               "url": it.get("product_url", ""),
+                               "url_type": it.get("url_type", ""),
+                               "has_image": bool(it.get("image_url")),
+                           } for it in enriched_items])
+
                 if broken_count == 0:
-                    # 全て検証成功
+                    # 全て検証成功（URLが無かったものはそのまま）
                     result["items"] = enriched_items
-                    return {**result, "reply": _clean_reply_text(result["reply"]), "raw_reply": reply_text}
+                    trace.step("chat_done", status="success")
+                    return _make_result(result, reply_text)
 
                 if attempt < MAX_VALIDATION_RETRIES - 1:
                     logger.warning(f"Found {broken_count} broken URLs. Retrying: {error_msg}")
+                    trace.step("retry", broken_count=broken_count, error_msg=error_msg[:200])
                     # ユーザーには見せず、システムからAIへ修正要求
                     contents.append(types.Content(
                         role="model",
@@ -659,12 +805,15 @@ async def chat(history: list[dict], user_message: str) -> dict:
                 else:
                     logger.warning("Max validation retries reached. Returning gracefully.")
                     result["items"] = enriched_items
-                    return {**result, "reply": _clean_reply_text(result["reply"]), "raw_reply": reply_text}
+                    trace.step("chat_done", status="max_retries_reached")
+                    return _make_result(result, reply_text)
 
         except Exception as e:
             last_error = e
+            trace.step("model_error", model=model_name, error=str(e)[:300], error_type=type(e).__name__)
             logger.warning(f"Model {model_name} failed: {type(e).__name__}: {e}")
             continue
 
+    trace.step("chat_done", status="all_models_failed")
     logger.error(f"All models failed. Last error: {last_error}")
     raise last_error

@@ -10,7 +10,10 @@
   <div class="app">
     <header>
       <h1>Gift Concierge</h1>
-      <button id="reset-btn" title="新しい相談">新しい相談</button>
+      <div class="header-actions">
+        <button id="debug-toggle" class="debug-toggle-btn" onclick="toggleDebugMode()">Debug: OFF</button>
+        <button id="reset-btn" title="新しい相談">新しい相談</button>
+      </div>
     </header>
 
     <main id="messages" class="messages"></main>

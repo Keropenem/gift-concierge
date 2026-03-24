@@ -10,7 +10,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .gemini_client import chat
+from .gemini_client import chat, set_debug_mode
+from . import gemini_client as _gc
 from .prompts import GREETING
 
 logging.basicConfig(level=logging.DEBUG)
@@ -75,11 +76,14 @@ async def api_chat(request: ChatRequest, raw_request: Request):
         if result["items"]:
             logger.info(f"[{session_id[:8]}] Items count: {len(result['items'])}")
 
-        return {
+        resp = {
             "reply": result["reply"],
             "items": result["items"],
             "session_id": session_id,
         }
+        if "_debug" in result:
+            resp["_debug"] = result["_debug"]
+        return resp
 
     except Exception as e:
         logger.error(f"[{session_id[:8]}] Error: {type(e).__name__}: {e}")
@@ -95,6 +99,22 @@ async def api_reset(raw_request: Request):
     if session_id in sessions:
         del sessions[session_id]
     return {"status": "ok"}
+
+
+# ── デバッグモード ──
+
+@app.get("/api/debug")
+async def api_debug_status():
+    """デバッグモードの現在の状態を返す"""
+    return {"debug": _gc.DEBUG_MODE}
+
+
+@app.post("/api/debug")
+async def api_debug_toggle():
+    """デバッグモードを切り替える"""
+    set_debug_mode(not _gc.DEBUG_MODE)
+    logger.info(f"Debug mode: {'ON' if _gc.DEBUG_MODE else 'OFF'}")
+    return {"debug": _gc.DEBUG_MODE}
 
 
 FRONTEND = Path(__file__).resolve().parent.parent / "frontend"

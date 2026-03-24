@@ -54,7 +54,7 @@ chatForm.addEventListener("submit", async (e) => {
       localStorage.setItem("gc-session", sessionId);
     }
 
-    addMessage(messagesEl, "ai", data.reply, data.items);
+    addMessage(messagesEl, "ai", data.reply, data.items, data._debug);
   } catch (err) {
     thinkingEl.remove();
     addMessage(messagesEl, "error", err.message);
