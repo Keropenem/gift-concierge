@@ -307,28 +307,37 @@ async def _verify_and_enrich(items: list[dict]) -> list[dict]:
             item["product_url"] = ""
             continue
 
-        if result.get("accessible") and result.get("is_product_page"):
+        if result.get("accessible"):
             # OG画像
             og = result.get("og_image_url")
             if og:
                 item["image_url"] = og
 
-            # 実際の価格で上書き
-            actual_price = result.get("price")
-            if actual_price:
-                item["actual_price"] = actual_price
-                item["actual_high_price"] = result.get("high_price")
-                item["actual_currency"] = result.get("currency", "")
-                item["price_min"] = int(actual_price)
-                item["price_max"] = int(result.get("high_price") or actual_price)
+            if result.get("is_product_page"):
+                # 商品ページ確認OK
+                item["url_type"] = "product"
+                actual_price = result.get("price")
+                if actual_price:
+                    item["actual_price"] = actual_price
+                    item["actual_high_price"] = result.get("high_price")
+                    item["actual_currency"] = result.get("currency", "")
+                    item["price_min"] = int(actual_price)
+                    item["price_max"] = int(result.get("high_price") or actual_price)
+                    logger.info(
+                        f"Price update for {item.get('name', '?')}: "
+                        f"{actual_price} {result.get('currency', '')}"
+                    )
+            else:
+                # アクセスできるがホームページ等 → 公式サイトとして残す
+                item["url_type"] = "official"
                 logger.info(
-                    f"Price update for {item.get('name', '?')}: "
-                    f"{actual_price} {result.get('currency', '')}"
+                    f"Homepage URL for {item.get('name', '?')}: "
+                    f"{item.get('product_url', '')} → keeping as official site"
                 )
         else:
-            # 検証NG → URLだけ消す（アイテム自体は残す）
+            # アクセス不可 → URLを消す
             logger.info(
-                f"Invalid URL for {item.get('name', '?')}: "
+                f"Inaccessible URL for {item.get('name', '?')}: "
                 f"{item.get('product_url', '')} → clearing URL"
             )
             item["product_url"] = ""

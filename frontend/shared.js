@@ -57,7 +57,7 @@ function addMessage(messagesEl, role, text, items) {
           ${priceText ? `<div class="item-price">${priceText}</div>` : ""}
           ${item.tip ? `<div class="item-tip">${escapeHtml(item.tip)}</div>` : ""}
           <div class="item-actions">
-            ${item.product_url ? `<a href="${escapeHtml(item.product_url)}" target="_blank" rel="noopener" class="item-link">商品を見る</a>` : ""}
+            ${item.product_url ? `<a href="${escapeHtml(item.product_url)}" target="_blank" rel="noopener" class="item-link">${item.url_type === "official" ? "公式サイト" : "商品を見る"}</a>` : ""}
             ${item.search_keyword ? `<a href="https://www.google.com/search?q=${encodeURIComponent(item.search_keyword)}" target="_blank" rel="noopener" class="item-search">検索する</a>` : ""}
           </div>
         </div>
