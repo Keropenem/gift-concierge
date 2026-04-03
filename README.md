@@ -1,25 +1,37 @@
-# Gift Concierge
+# Con-TecT
 
-大切な人にぴったりのプレゼントを提案するWebアプリ。
+Context Matching Gift EC Service
+
+贈り手と受け取り手の人生の文脈から「見えない共通点」を見出し、唯一無二のプレゼントを提案するギフトECサービス。
+
+## 技術スタック
+
+- **Frontend**: Next.js + TypeScript + Tailwind CSS + shadcn/ui
+- **Backend**: Next.js API Routes
+- **DB/Auth**: Supabase (PostgreSQL + Auth)
+- **LLM**: Gemini API (Google AI)
+- **Hosting**: Vercel
 
 ## セットアップ
 
 ```bash
 # 依存パッケージインストール
-pip install -r backend/requirements.txt
+npm install
 
-# APIキー設定
-cp .env.example .env
-# .env を開いて GEMINI_API_KEY を設定
+# 環境変数設定
+cp .env.local.example .env.local
+# .env.local を編集して各種APIキーを設定
 
-# サーバー起動
-uvicorn backend.main:app --reload
-
-# ブラウザで http://localhost:8000 を開く
+# 開発サーバー起動
+npm run dev
 ```
 
-## Gemini APIキーの取得
+ブラウザで http://localhost:3000 を開く
 
-1. [Google AI Studio](https://aistudio.google.com/apikey) にアクセス
-2. 「Create API Key」でキーを発行
-3. `.env` ファイルに貼り付け
+## 環境変数
+
+| 変数名 | 説明 |
+|--------|------|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase プロジェクトURL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anonymous key |
+| `GEMINI_API_KEY` | Google AI (Gemini) APIキー |

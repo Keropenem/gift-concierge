@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>GEM開発検証レポート</title>
+<style>
+  body { font-family: 'Noto Sans JP', 'Yu Gothic', sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.8; color: #333; }
+  h1 { font-size: 22px; border-bottom: 3px solid #333; padding-bottom: 8px; }
+  h2 { font-size: 18px; border-bottom: 1px solid #999; padding-bottom: 4px; margin-top: 40px; }
+  h3 { font-size: 15px; margin-top: 24px; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 13px; }
+  th, td { border: 1px solid #ccc; padding: 8px 10px; text-align: left; }
+  th { background: #f5f5f5; font-weight: bold; }
+  blockquote { border-left: 4px solid #666; margin: 16px 0; padding: 8px 16px; background: #fafafa; }
+  code { background: #f0f0f0; padding: 2px 6px; font-size: 13px; }
+  .subtitle { color: #666; font-size: 14px; margin-bottom: 32px; }
+  .highlight { background: #fff9e6; padding: 12px 16px; border-left: 4px solid #f0c040; margin: 16px 0; }
+  .section-label { font-size: 12px; color: #888; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 4px; }
+  ul { padding-left: 24px; }
+  li { margin-bottom: 4px; }
+  hr { border: none; border-top: 1px solid #ddd; margin: 32px 0; }
+</style>
+</head>
+<body>
+
+<h1>ギフト提案AIシステム（GEM）開発検証レポート</h1>
+<p class="subtitle">
+  作成日：2026年3月27日<br>
+  対象：クライアント向け進捗報告
+</p>
+
+<hr>
+
+<h2>1. プロジェクト概要</h2>
+
+<h3>目的</h3>
+<p>贈り手と受け手の「唯一無二の関係性」からギフトを提案するAIコンシェルジュシステム（GEM：Gift Exploration Machine）のプロンプト設計・改良。</p>
+
+<h3>核心の問い</h3>
+<p><strong>同じ入力情報に対して、プロンプト（AIへの指示）をどう変えれば、提案の質が変わるか？</strong></p>
+<p>単なる「受け手の属性に合わせた商品提案」ではなく、二人の間にしか存在しない関係性を発見し、それを一つの商品に結晶させることを目指しています。</p>
+
+<h3>検証構造</h3>
+<p>2つのテストシナリオ × 9バージョンのプロンプトで比較検証を実施しました。</p>
+
+<table>
+  <tr><th></th><th>父へのギフト</th><th>メンターへのギフト</th></tr>
+  <tr><td><strong>贈り手</strong></td><td>38歳医師（息子）</td><td>38歳医師（元メンティー）</td></tr>
+  <tr><td><strong>受け手</strong></td><td>67歳・視覚障害・車椅子・元ガーデナー→現在料理担当</td><td>60代・NGO理事長・退任準備中・母の介護</td></tr>
+  <tr><td><strong>予算</strong></td><td>5,000円以内</td><td>5,000円以内（豪州土産）</td></tr>
+  <tr><td><strong>シナリオの特性</strong></td><td>強い制約（障害・生活変化が明確）</td><td>弱い制約（属性が分散）</td></tr>
+</table>
+
+<hr>
+
+<h2>2. 最高評価の提案（ベンチマーク）</h2>
+
+<p>9バージョンの検証を通じて、以下の2つが最高評価（◎）を獲得しました。</p>
+
+<h3>父シナリオ：青森ひばのまな板（ベースライン）</h3>
+<ul>
+  <li>元ガーデナーで現在料理を担う父に、息子が「まな板」を贈る</li>
+  <li>青森ひば（天然の抗菌素材）は、医師の息子が選ぶ素材として三重の必然性がある</li>
+  <li>「お前の新しい人生を見ているよ」「それを大事なものとして認めているよ」が、まな板というモノに結晶している</li>
+</ul>
+
+<h3>メンターシナリオ：Purple House Bush Balm（Ver.4）</h3>
+<ul>
+  <li>オーストラリアの先住民医療支援NGOが作るハンドバーム</li>
+  <li>医師（贈り手）× NGO理事長（受け手）× 医療支援NGOの商品という三者の構造的一致</li>
+  <li>「医師がなぜ民間療法を？」→「二人は別々の道で同じこと（人を助けること）をしていた」という二段階の発見</li>
+</ul>
+
+<div class="highlight">
+  <strong>この2つに共通する本質：</strong> 贈り手が受け手の人生の変容をどう見ているかが、商品に結晶している。
+</div>
+
+<hr>
+
+<h2>3. 検証の道筋</h2>
+
+<h3>フェーズA：物語の力と限界の発見（ベースライン〜Ver.3）</h3>
+
+<p><strong>ベースラインの発見：「たった1行」がすべてを変える</strong></p>
+
+<p>2つのほぼ同一のプロンプトを比較しました。唯一の違いは以下の1行の有無です。</p>
+
+<p style="background:#f0f0f0; padding:12px 16px; font-family:monospace; font-size:13px;">
+  Step5とStep7はエモーショナルでない、シンプルな文章で執筆、提案すること
+</p>
+
+<ul>
+  <li><strong>この1行あり（ベースライン）：</strong> まな板（◎）が出現</li>
+  <li><strong>この1行なし（Ver.1）：</strong> 七味唐辛子（△）に着地</li>
+</ul>
+
+<p>この1行が、物語の抑制→商品探索の自由度拡大→意外性のある提案、という連鎖を生んでいました。</p>
+
+<p><strong>Ver.2〜3の試行錯誤：</strong></p>
+<ul>
+  <li>Ver.2「物語を先に作ってから、一度忘れて商品を探す」→ <strong>失敗。LLMは物語を忘れられない。</strong></li>
+  <li>Ver.3「物語を最後に作る（先に商品を探す）」→ <strong>部分的成功。</strong> 骨伝導イヤホンという全く新しいカテゴリの候補が出現。物語がない状態では探索空間が広がることを実証。</li>
+</ul>
+
+<h3>フェーズB：関係性起点の設計と哲学の確立（Ver.4〜5）</h3>
+
+<p><strong>Ver.4：GEMの哲学が形になる</strong></p>
+
+<p>それまでのプロンプトは「受け手の属性を分析→商品を探す」という一方向でした。Ver.4で「贈り手と受け手の関係性の中にある"隠れたつながり"を起点に商品を探す」という設計に転換。</p>
+
+<p>→ <strong>メンターシナリオでBush Balm（◎）が出現。</strong> 関係性起点の探索が最高品質を生むことを実証。</p>
+
+<p><strong>Ver.5：シンプル化の実験 → 失敗</strong></p>
+
+<p>Ver.4の詳細な指示を骨子だけに簡略化。結果、メンターシナリオは明確に退行（マグネシウムスプレー：△）。</p>
+
+<p>→ <strong>知見：</strong> AIに自由度を与えすぎると、入力に強い制約がないシナリオでは属性マッチング（「ウェルネス好き→ウェルネス商品」）に陥る。</p>
+
+<h3>フェーズC：「まなざし」の発見と実装（Ver.6〜7）</h3>
+
+<p><strong>Ver.6：◎の本質を解明</strong></p>
+
+<p>◎提案の再分析により、本質が「つながりの発見」ではなく<strong>「まなざし」</strong>であることを発見しました。</p>
+
+<table>
+  <tr><th></th><th>◎の提案</th><th>○以下の提案</th></tr>
+  <tr><td><strong>核心</strong></td><td>贈り手が受け手の人生の変容をどう見ているか</td><td>表面的な属性・趣味に基づく</td></tr>
+  <tr><td><strong>商品の役割</strong></td><td>「存在の認識」を伝える</td><td>「相手への理解」を示す</td></tr>
+  <tr><td><strong>印象</strong></td><td>偶然見つかったように感じる</td><td>設計されたと感じる</td></tr>
+</table>
+
+<p>この知見を「変容の特定→まなざしの言語化→一文をモノで言い換える」というプロンプト構造に実装。</p>
+
+<p>→ しかし父シナリオは3度目の同一商品（すり鉢）に着地。分析の深度を変えても同じ入力からは同じカテゴリに収束することが判明。</p>
+
+<p><strong>Ver.7：カテゴリ発散の導入</strong></p>
+
+<p>分析の問い方ではなく、<strong>探索空間の広さ</strong>を変数として動かすアプローチ。商品探索の前に「7カテゴリ以上を列挙する」ステップを挿入。</p>
+
+<p>→ <strong>すり鉢からの脱出に成功。</strong> 7カテゴリの多様な候補が出現。ただし最終選定で「誰からでも贈れる無難な商品」が選ばれてしまう新たな課題が発覚。</p>
+
+<h3>フェーズD：選定基準の精緻化（Ver.8〜9）</h3>
+
+<p><strong>Ver.8：「関係性の固有性」条件の追加</strong></p>
+
+<p>「この贈り手からでなければ意味をなさない商品であること」というテスト基準を追加。</p>
+
+<p>→ <strong>失敗。</strong> 父シナリオはハンドソープ（誕生日に嬉しくない）、メンターシナリオは商品名"Transition"がメッセージをネタバレ。AIが論理的最適解と贈り物としての最適解を区別できていない。</p>
+
+<p><strong>Ver.9：5条件選定 + EC出力形式</strong></p>
+
+<p>Ver.8の失敗を受けて以下を追加：</p>
+<ul>
+  <li>条件4「贈り物としての喜び」：もらって素直に嬉しいか</li>
+  <li>条件5「意味の暗黙性」：意味は使う中で気づくべきもので、商品名で読み取れてはいけない</li>
+  <li>出力形式をEC体験（提案商品・理由・届け方・メッセージ例文）に整備</li>
+  <li>内部思考プロセスは非表示、最終提案の1商品のみ表示</li>
+</ul>
+
+<p>→ <strong>改善傾向。</strong> メンターシナリオでウィートバッグ（○・新規性の高い面白い選択）、父シナリオでオリーブオイル（○・悪くないが関係性固有性が弱い）。</p>
+
+<hr>
+
+<h2>4. 検証結果一覧</h2>
+
+<h3>父へのギフトシナリオ</h3>
+
+<table>
+  <tr><th>Ver.</th><th>提案商品</th><th>評価</th><th>主な特徴</th></tr>
+  <tr><td>ベースライン</td><td><strong>青森ひばのまな板</strong></td><td><strong>◎</strong></td><td>全バージョン中最高。抑制された文体が意外性を生んだ</td></tr>
+  <tr><td>Ver.1</td><td>やまつ辻田の七味</td><td>△</td><td>物語が商品を「挿絵」にした典型</td></tr>
+  <tr><td>Ver.2</td><td>純胡椒</td><td>△〜○</td><td>「物語を忘れる」は形式的発散にとどまった</td></tr>
+  <tr><td>Ver.3</td><td>電動ミル</td><td>○</td><td>物語禁止で新カテゴリ候補（骨伝導イヤホン）出現</td></tr>
+  <tr><td>Ver.4</td><td>山椒すりこぎ＋すり鉢</td><td>○</td><td>関係性起点の設計で品質安定</td></tr>
+  <tr><td>Ver.5</td><td>かもしか道具店のすり鉢</td><td>○</td><td>シンプル化しても同カテゴリ＝入力バイアスの証拠</td></tr>
+  <tr><td>Ver.6</td><td>かもしか道具店のすり鉢（3度目）</td><td>○</td><td>分析を変えても同一商品に収束</td></tr>
+  <tr><td>Ver.7</td><td>ステンレスピーラー</td><td>○</td><td>カテゴリ発散で新商品に到達、ただし無難</td></tr>
+  <tr><td>Ver.8</td><td>BAUMハンドウォッシュ</td><td>△</td><td>論理パズル的選定。贈り物として嬉しくない</td></tr>
+  <tr><td>Ver.9</td><td>ラウデミオ オリーブオイル</td><td>○</td><td>改善傾向。関係性固有性が課題</td></tr>
+</table>
+
+<h3>メンターへのギフトシナリオ</h3>
+
+<table>
+  <tr><th>Ver.</th><th>提案商品</th><th>評価</th><th>主な特徴</th></tr>
+  <tr><td>ベースライン</td><td>LEIF Hand Balm</td><td>○</td><td>安定した品質</td></tr>
+  <tr><td>Ver.1</td><td>Mayde Tea / Perfect Potion</td><td>△</td><td>属性マッチングの典型</td></tr>
+  <tr><td>Ver.2</td><td>Roogenic＋はちみつ</td><td>△〜○</td><td>発散が形式的</td></tr>
+  <tr><td>Ver.3</td><td>ロールオンアロマ</td><td>○</td><td>物語禁止の効果</td></tr>
+  <tr><td>Ver.4</td><td><strong>Purple House Bush Balm</strong></td><td><strong>◎</strong></td><td>全バージョン中最高。関係性の構造的一致</td></tr>
+  <tr><td>Ver.5</td><td>Salt Lab マグネシウムスプレー</td><td>△</td><td>シンプル化で退行。属性マッチング</td></tr>
+  <tr><td>Ver.6</td><td>Perfect Potion / Roogenic / Aesop</td><td>△</td><td>プロンプト構造を完全に無視</td></tr>
+  <tr><td>Ver.7</td><td>Banksia Seed Pod Diffuser</td><td>○</td><td>構造復活。ただし汎用的な選択</td></tr>
+  <tr><td>Ver.8</td><td>Bush Flower Essences "Transition"</td><td>△</td><td>商品名がメッセージをネタバレ</td></tr>
+  <tr><td>Ver.9</td><td>Wheatbags Love ウィートバッグ</td><td>○</td><td>新規性のある面白い選択</td></tr>
+</table>
+
+<hr>
+
+<h2>5. 得られた知見（実務的示唆）</h2>
+
+<h3>プロンプト設計に関する知見</h3>
+
+<p><strong>1. 「シンプルに書け」の1行がパイプライン全体を規定する</strong><br>
+出力のトーンを指定する短い制約が、分析→探索→提案の全段階に連鎖的に影響する。制約は指定ステップだけでなく、AIの「思考の温度感」そのものを決める。</p>
+
+<p><strong>2. LLMは「忘れろ」と言われても忘れられない</strong><br>
+物語を先に生成すると、後の商品探索がすべて物語の引力圏内に留まる。物語と商品探索を分離するには、物語を「後に作る」のではなく「まだ存在しない状態」を構造的に作る必要がある。</p>
+
+<p><strong>3. AIに自由度を与えすぎると品質が下がる</strong><br>
+シンプルなプロンプトが機能するのは、入力情報に強い制約（視覚障害、車椅子など）がある場合のみ。制約が弱い入力に対しては、プロンプト側に構造的なガードレールが必要。</p>
+
+<h3>商品選定に関する知見</h3>
+
+<p><strong>4. ◎提案の本質は「まなざし」</strong><br>
+最高品質の提案に共通するのは「贈り手が受け手の人生の変容をどう見ているか」が商品に結晶していること。表面的な「つながり」や「属性マッチング」とは本質的に異なる。</p>
+
+<p><strong>5. 入力バイアスは分析パイプラインでは超えられない</strong><br>
+同じ入力からは、分析の問いを変えても同じ商品カテゴリに収束する（3バージョンで3回すり鉢）。カテゴリレベルでの発散を構造的に強制するステップが必要。</p>
+
+<p><strong>6. 探索の発散と選定は別の問題</strong><br>
+カテゴリ発散で候補の多様性は確保できるが、最終選定で「無難な商品」が選ばれる。発散と選定にはそれぞれ別の介入が必要。</p>
+
+<p><strong>7. AIは「贈り物の常識」を持っていない</strong><br>
+「もらって嬉しいか」「商品名が意味をネタバレしていないか」という人間にとって自明な基準も、AIには明示的な条件として記述しないと適用されない。</p>
+
+<p><strong>8. AIは「関係性の固有性」を自己評価できない</strong><br>
+「贈り手を別の人物に置き換えても成立する提案は不可」と書いても、AIの選定行動は変わらない。テスト基準の記述だけでは不十分で、より強い構造的介入が必要。</p>
+
+<hr>
+
+<h2>6. 現在のプロンプト構造（Ver.9）</h2>
+
+<table>
+  <tr><th>処理</th><th>ステップ</th><th>内容</th></tr>
+  <tr><td rowspan="8" style="background:#f0f0f0; vertical-align:top;"><strong>内部処理</strong><br><span style="font-size:12px; color:#888;">（ユーザーには<br>表示しない）</span></td><td>Step 1〜3</td><td>事実の収集（受け手・贈り手・関係性）</td></tr>
+  <tr><td>Step 4</td><td>受け手の人生の変容を特定</td></tr>
+  <tr><td>Step 5</td><td>贈り手のまなざしを一文で言語化</td></tr>
+  <tr><td>Step 6</td><td>商品カテゴリを7つ以上発散</td></tr>
+  <tr><td>Step 7</td><td>各カテゴリから1商品ずつ探索</td></tr>
+  <tr><td rowspan="3">Step 8</td><td>5条件で最終選定</td></tr>
+  <tr><td style="font-size:13px;">条件1：二段階の意外性 / 条件2：関係性の固有性 / 条件3：まなざしとの一体性</td></tr>
+  <tr><td style="font-size:13px;">条件4：贈り物としての喜び / 条件5：意味の暗黙性</td></tr>
+  <tr><td style="background:#fff9e6; vertical-align:top;"><strong>ユーザーへの出力</strong><br><span style="font-size:12px; color:#888;">（1商品のみ）</span></td><td>Step 9</td><td>提案文（商品情報・選定理由・届け方・メッセージ例文）</td></tr>
+</table>
+
+<hr>
+
+<h2>7. 現在地と今後の課題</h2>
+
+<h3>達成したこと</h3>
+<ul>
+  <li>GEMの設計哲学の確立（まなざし × 二段階の意外性）</li>
+  <li>◎品質の提案が生まれる条件の特定</li>
+  <li>カテゴリ発散による探索空間の拡張</li>
+  <li>EC体験としての出力形式の整備</li>
+  <li>9バージョンの体系的な検証による12の実務的知見</li>
+</ul>
+
+<h3>残る課題</h3>
+<ul>
+  <li><strong>「関係性の固有性」のAI実装：</strong> 現状、AIはこの条件を自己評価できない。テスト基準を書くだけでは選定行動が変わらず、より強い構造的介入が必要</li>
+  <li><strong>「まな板超え」の未達成：</strong> 父シナリオではベースラインを超える◎提案が出ていない。入力バイアスの壁を突破する新たなアプローチが必要</li>
+  <li><strong>安定性：</strong> ◎品質が偶発的に生まれるのではなく、再現可能な形で安定的に出力される仕組みの構築</li>
+</ul>
+
+<h3>GEMの設計哲学（現時点の定義）</h3>
+
+<blockquote>
+  <p>贈り物とは、贈り手が受け手の人生をどう見ているかを、一つのモノで伝える行為である。</p>
+  <p>良い贈り物は、受け手の人生における最も本質的な変容を見つめ、贈り手が言葉では一度も言っていないが本当は伝えたいことを、商品に結晶させたものである。</p>
+  <p>そしてその提案には二段階の意外性がある——「なぜこの人からこれを？」という驚きと、「この商品自体が予想外」という驚きが重なったとき、受け手はしばらく使ううちに、贈り手のまなざしに気づく。</p>
+</blockquote>
+
+</body>
+</html>
