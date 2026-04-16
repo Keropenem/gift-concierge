@@ -312,7 +312,7 @@ export default function MyPage() {
       </Modal>
 
       {/* 受け手詳細モーダル — 基本情報 + ボタン */}
-      <Modal open={!!recipientDetailId && !recipientNotesModalOpen && !recipientProposalsModalOpen} onClose={() => setRecipientDetailId(null)} onBack={() => setRecipientDetailId(null)} title={selectedRecipient?.nickname ?? "詳細"}>
+      <Modal open={!!recipientDetailId} onClose={() => { setRecipientDetailId(null); setRecipientNotesModalOpen(false); setRecipientProposalsModalOpen(false); }} onBack={() => setRecipientDetailId(null)} title={selectedRecipient?.nickname ?? "詳細"}>
         {selectedRecipient && (
           <div className="space-y-4">
             <form onSubmit={handleUpdateRecipient} className="flex flex-col gap-3">

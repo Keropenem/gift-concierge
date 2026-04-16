@@ -1,13 +1,36 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useCallback } from "react";
 
 export function Modal({ open, onClose, onBack, title, children }: { open: boolean; onClose: () => void; onBack?: () => void; title: string; children: React.ReactNode }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const wasOpen = useRef(false);
+
+  const handleBack = useCallback(() => {
+    if (onBack) onBack();
+    else onClose();
+  }, [onBack, onClose]);
 
   useEffect(() => {
-    if (open) dialogRef.current?.showModal();
-    else dialogRef.current?.close();
+    if (open && !wasOpen.current) {
+      dialogRef.current?.showModal();
+      history.pushState({ modal: true }, "");
+      wasOpen.current = true;
+    } else if (!open && wasOpen.current) {
+      dialogRef.current?.close();
+      wasOpen.current = false;
+    }
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const onPopState = () => {
+      handleBack();
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [open, handleBack]);
 
   return (
     <dialog
