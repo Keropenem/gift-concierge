@@ -27,6 +27,8 @@ export default function MyPage() {
   const [memoryModalOpen, setMemoryModalOpen] = useState(false);
   const [recipientModalOpen, setRecipientModalOpen] = useState(false);
   const [recipientDetailId, setRecipientDetailId] = useState<string | null>(null);
+  const [recipientNotesModalOpen, setRecipientNotesModalOpen] = useState(false);
+  const [recipientProposalsModalOpen, setRecipientProposalsModalOpen] = useState(false);
   const [recipientNotes, setRecipientNotes] = useState<RecipientNote[]>([]);
   const [recipientProposals, setRecipientProposals] = useState<Proposal[]>([]);
 
@@ -318,11 +320,10 @@ export default function MyPage() {
         )}
       </Modal>
 
-      {/* 受け手詳細モーダル */}
-      <Modal open={!!recipientDetailId} onClose={() => setRecipientDetailId(null)} title={selectedRecipient?.nickname ?? "詳細"}>
+      {/* 受け手詳細モーダル — 基本情報 + ボタン */}
+      <Modal open={!!recipientDetailId && !recipientNotesModalOpen && !recipientProposalsModalOpen} onClose={() => setRecipientDetailId(null)} title={selectedRecipient?.nickname ?? "詳細"}>
         {selectedRecipient && (
-          <div className="space-y-6">
-            {/* 編集フォーム */}
+          <div className="space-y-4">
             <form onSubmit={handleUpdateRecipient} className="flex flex-col gap-3">
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -334,7 +335,6 @@ export default function MyPage() {
                   <input type="text" value={recipientForm.relationship} onChange={e => setRecipientForm(f => ({ ...f, relationship: e.target.value }))} className="w-full px-3 py-1.5 text-sm border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring/20" />
                 </div>
               </div>
-
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium mb-1 text-muted-foreground">年齢</label>
@@ -350,80 +350,85 @@ export default function MyPage() {
                   </select>
                 </div>
               </div>
-
               <div>
                 <label className="block text-xs font-medium mb-1 text-muted-foreground">職業</label>
                 <input type="text" value={recipientForm.occupation} onChange={e => setRecipientForm(f => ({ ...f, occupation: e.target.value }))} className="w-full px-3 py-1.5 text-sm border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring/20" />
               </div>
-
               <div>
                 <label className="block text-xs font-medium mb-1 text-muted-foreground">関心事</label>
-                <input type="text" value={recipientForm.interests} onChange={e => setRecipientForm(f => ({ ...f, interests: e.target.value }))} className="w-full px-3 py-1.5 text-sm border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring/20" placeholder="カンマ区切りで入力" />
+                <input type="text" value={recipientForm.interests} onChange={e => setRecipientForm(f => ({ ...f, interests: e.target.value }))} className="w-full px-3 py-1.5 text-sm border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring/20" placeholder="カンマ区切り" />
               </div>
-
-              <div>
-                <label className="block text-xs font-medium mb-1 text-muted-foreground">得意なこと</label>
-                <input type="text" value={recipientForm.strengths} onChange={e => setRecipientForm(f => ({ ...f, strengths: e.target.value }))} className="w-full px-3 py-1.5 text-sm border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring/20" placeholder="カンマ区切りで入力" />
-              </div>
-
               <button type="submit" disabled={recipientSaving} className="w-full py-1.5 text-sm bg-primary text-primary-foreground rounded-md hover:opacity-90 transition-opacity disabled:opacity-50">
                 {recipientSaving ? "更新中..." : "更新"}
               </button>
             </form>
 
-            {/* AIが記録した情報 */}
-            <div>
-              <h4 className="text-sm font-semibold mb-2">AIが記録した情報</h4>
-              {recipientNotes.length === 0 ? (
-                <p className="text-xs text-muted-foreground">まだ記録がありません。</p>
-              ) : (
-                <div className="space-y-1">
-                  {recipientNotes.map(note => (
-                    <div key={note.id} className="flex items-start gap-2 text-sm px-3 py-2 bg-muted/30 rounded-md">
-                      <span className="text-muted-foreground mt-0.5">&#8226;</span>
-                      <div className="flex-1">
-                        <span>{note.content}</span>
-                        <span className="text-[10px] text-muted-foreground ml-2">{new Date(note.created_at).toLocaleDateString("ja-JP")}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+            {/* サブモーダルへのボタン */}
+            <div className="flex gap-2">
+              <button
+                onClick={() => setRecipientNotesModalOpen(true)}
+                className="flex-1 py-2.5 text-sm border border-border rounded-md hover:bg-muted transition-colors"
+              >
+                AIの記録 ({recipientNotes.length}件)
+              </button>
+              <button
+                onClick={() => setRecipientProposalsModalOpen(true)}
+                className="flex-1 py-2.5 text-sm border border-border rounded-md hover:bg-muted transition-colors"
+              >
+                提案履歴 ({recipientProposals.length}件)
+              </button>
             </div>
 
-            {/* 提案履歴 */}
-            <div>
-              <h4 className="text-sm font-semibold mb-2">提案履歴</h4>
-              {recipientProposals.length === 0 ? (
-                <p className="text-xs text-muted-foreground">まだ提案がありません。</p>
-              ) : (
-                <div className="space-y-2">
-                  {recipientProposals.map(p => (
-                    <div key={p.id} className="p-3 border border-border rounded-lg text-sm">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-medium">{p.product_name}</span>
-                        {p.product_price && <span className="text-xs text-muted-foreground">{p.product_price}</span>}
-                      </div>
-                      {p.product_description && <p className="text-xs text-muted-foreground mb-1">{p.product_description}</p>}
-                      {p.narrative && <p className="text-xs text-muted-foreground italic mb-1">{p.narrative}</p>}
-                      <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                        {p.maker_name && <span>{p.maker_name}</span>}
-                        {p.occasion && <span>/ {p.occasion}</span>}
-                        <span>{new Date(p.created_at).toLocaleDateString("ja-JP")}</span>
-                      </div>
-                      {p.product_url && (
-                        <a href={p.product_url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline mt-1 inline-block">商品リンク</a>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* 削除ボタン */}
             <button onClick={() => handleDeleteRecipient(selectedRecipient.id)} className="w-full py-1.5 text-sm text-red-600 border border-red-200 rounded-md hover:bg-red-50 transition-colors">
               この相手を削除
             </button>
+          </div>
+        )}
+      </Modal>
+
+      {/* 受け手 AIメモ モーダル */}
+      <Modal open={recipientNotesModalOpen} onClose={() => setRecipientNotesModalOpen(false)} title={`${selectedRecipient?.nickname ?? ""} — AIの記録`}>
+        {recipientNotes.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-8">まだ記録がありません。チャットで相談するとAIが自動的に記録します。</p>
+        ) : (
+          <div className="space-y-2">
+            {recipientNotes.map(note => (
+              <div key={note.id} className="flex items-start gap-2 text-sm px-3 py-2 bg-muted/30 rounded-md">
+                <span className="text-muted-foreground mt-0.5">&#8226;</span>
+                <div className="flex-1">
+                  <span>{note.content}</span>
+                  <span className="text-[10px] text-muted-foreground ml-2">{new Date(note.created_at).toLocaleDateString("ja-JP")}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
+
+      {/* 受け手 提案履歴 モーダル */}
+      <Modal open={recipientProposalsModalOpen} onClose={() => setRecipientProposalsModalOpen(false)} title={`${selectedRecipient?.nickname ?? ""} — 提案履歴`}>
+        {recipientProposals.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-8">まだ提案がありません。</p>
+        ) : (
+          <div className="space-y-3">
+            {recipientProposals.map(p => (
+              <div key={p.id} className="p-4 border border-border rounded-lg text-sm">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-medium">{p.product_name}</span>
+                  {p.product_price && <span className="text-xs text-muted-foreground">{p.product_price}</span>}
+                </div>
+                {p.product_description && <p className="text-xs text-muted-foreground mb-1">{p.product_description}</p>}
+                {p.narrative && <p className="text-xs text-muted-foreground italic mb-2">{p.narrative}</p>}
+                <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                  {p.maker_name && <span>{p.maker_name}</span>}
+                  {p.occasion && <span>/ {p.occasion}</span>}
+                  <span>{new Date(p.created_at).toLocaleDateString("ja-JP")}</span>
+                </div>
+                {p.product_url && (
+                  <a href={p.product_url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline mt-1 inline-block">商品リンク</a>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </Modal>
