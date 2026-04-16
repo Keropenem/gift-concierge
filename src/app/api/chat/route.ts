@@ -484,10 +484,11 @@ export async function POST(request: NextRequest) {
 
     if (profile && profile.occupation) {
       contextParts.push(
-        `【会員情報】この贈り手は登録済み会員です。以下のプロフィールがあります:\n` +
-        `年齢: ${profile.age || "不明"}, 性別: ${profile.gender || "不明"}, 職業: ${profile.occupation || "不明"}\n` +
-        `関心事: ${(profile.interests || []).join(", ") || "不明"}, 得意なこと: ${(profile.strengths || []).join(", ") || "不明"}\n` +
-        `Step 1はスキップし、Step 2から開始してください。`
+        `【贈り手の情報】登録済み会員のプロフィール:\n` +
+        `${profile.name ? `名前: ${profile.name}, ` : ""}年齢: ${profile.age || "不明"}, 性別: ${profile.gender || "不明"}, 職業: ${profile.occupation || "不明"}\n` +
+        `関心事: ${(profile.interests || []).join(", ") || "不明"}\n` +
+        `この情報は既に把握しているため、贈り手自身について改めて聞く必要はありません。` +
+        `不足があれば追加で聞いてください。`
       );
     }
 
@@ -506,14 +507,17 @@ export async function POST(request: NextRequest) {
             matchedRecipient = r;
             console.log("[CHAT] auto-matched recipient:", r.nickname);
 
-            // 受け手ノートも取得
-            const { data: notes } = await supabase
-              .from("recipient_notes")
-              .select("content")
-              .eq("recipient_id", r.id);
+            // 受け手ノートと過去の提案履歴を取得
+            const [notesRes, proposalsRes] = await Promise.all([
+              supabase.from("recipient_notes").select("content").eq("recipient_id", r.id),
+              supabase.from("proposals").select("product_name, occasion, created_at").eq("recipient_id", r.id).order("created_at", { ascending: false }).limit(10),
+            ]);
 
-            if (notes && notes.length > 0) {
-              matchedRecipient._notes = notes.map((n: { content: string }) => n.content);
+            if (notesRes.data && notesRes.data.length > 0) {
+              matchedRecipient._notes = notesRes.data.map((n: { content: string }) => n.content);
+            }
+            if (proposalsRes.data && proposalsRes.data.length > 0) {
+              matchedRecipient._pastProposals = proposalsRes.data;
             }
             break;
           }
@@ -523,23 +527,28 @@ export async function POST(request: NextRequest) {
 
     if (matchedRecipient) {
       let recipientContext =
-        `【受取り手情報】以下の相手への贈り物です（過去の情報から自動取得）:\n` +
+        `【受取り手の基本情報】過去の会話から自動取得:\n` +
         `呼び名: ${matchedRecipient.nickname}, 関係性: ${matchedRecipient.relationship || "不明"}\n` +
         `年齢: ${matchedRecipient.age || "不明"}, 性別: ${matchedRecipient.gender || "不明"}, 職業: ${matchedRecipient.occupation || "不明"}\n` +
-        `関心事: ${(matchedRecipient.interests || []).join(", ") || "不明"}, 得意なこと: ${(matchedRecipient.strengths || []).join(", ") || "不明"}`;
+        `関心事: ${(matchedRecipient.interests || []).join(", ") || "不明"}`;
 
       if (matchedRecipient._notes && matchedRecipient._notes.length > 0) {
-        recipientContext += `\n【この相手について過去に記録された情報（関係性・エピソード・性格等）】\n` +
+        recipientContext += `\n\n【受取り手との関係性・エピソード】過去の会話から自動取得:\n` +
           matchedRecipient._notes.map((n: string) => `- ${n}`).join("\n");
-
-        if (matchedRecipient._notes.length >= 3) {
-          recipientContext += `\nStep 2とStep 3の両方をスキップし、Step 4から自動実行してください。上記の情報を基に「見えない共通点」の分析から始めてください。`;
-        } else {
-          recipientContext += `\nStep 2はスキップし、Step 3から開始してください。ただし、上記の記録済み情報と重複する質問はしないでください。`;
-        }
-      } else {
-        recipientContext += `\nStep 2もスキップし、Step 3から開始してください。`;
       }
+
+      if (matchedRecipient._pastProposals && matchedRecipient._pastProposals.length > 0) {
+        recipientContext += `\n\n【この相手への過去の提案履歴】\n` +
+          matchedRecipient._pastProposals.map((p: { product_name: string; occasion: string; created_at: string }) =>
+            `- ${p.product_name}${p.occasion ? `（${p.occasion}）` : ""} [${new Date(p.created_at).toLocaleDateString("ja-JP")}]`
+          ).join("\n") +
+          `\n上記の商品は過去に提案済みです。同じ商品や類似商品は提案しないでください。`;
+      }
+
+      recipientContext += `\n\n上記は過去の会話で蓄積された情報です。` +
+        `この情報を踏まえた上で、提案に十分な情報があればそのまま提案に進んでください。` +
+        `不足している情報があれば、既に分かっていることは聞き直さず、足りない部分だけ追加で質問してください。`;
+
       contextParts.push(recipientContext);
     }
 
