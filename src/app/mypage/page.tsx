@@ -312,7 +312,7 @@ export default function MyPage() {
       </Modal>
 
       {/* 受け手詳細モーダル — 基本情報 + ボタン */}
-      <Modal open={!!recipientDetailId && !recipientNotesModalOpen && !recipientProposalsModalOpen} onClose={() => setRecipientDetailId(null)} title={selectedRecipient?.nickname ?? "詳細"}>
+      <Modal open={!!recipientDetailId && !recipientNotesModalOpen && !recipientProposalsModalOpen} onClose={() => setRecipientDetailId(null)} onBack={() => setRecipientDetailId(null)} title={selectedRecipient?.nickname ?? "詳細"}>
         {selectedRecipient && (
           <div className="space-y-4">
             <form onSubmit={handleUpdateRecipient} className="flex flex-col gap-3">
@@ -360,7 +360,7 @@ export default function MyPage() {
                 onClick={() => setRecipientNotesModalOpen(true)}
                 className="flex-1 py-2.5 text-sm border border-border rounded-md hover:bg-muted transition-colors"
               >
-                AIの記録 ({recipientNotes.length}件)
+                メモリ ({recipientNotes.length}件)
               </button>
               <button
                 onClick={() => setRecipientProposalsModalOpen(true)}
@@ -378,18 +378,47 @@ export default function MyPage() {
       </Modal>
 
       {/* 受け手 AIメモ モーダル */}
-      <Modal open={recipientNotesModalOpen} onClose={() => setRecipientNotesModalOpen(false)} title={`${selectedRecipient?.nickname ?? ""} — AIの記録`}>
+      <Modal open={recipientNotesModalOpen} onClose={() => { setRecipientNotesModalOpen(false); }} onBack={() => setRecipientNotesModalOpen(false)} title={`${selectedRecipient?.nickname ?? ""} — メモリ`}>
+        <p className="text-xs text-muted-foreground mb-4">AIとの会話から記録された情報です。編集・削除や手動追加もできます。</p>
+
+        <form onSubmit={async (e) => {
+          e.preventDefault();
+          const input = (e.target as HTMLFormElement).elements.namedItem("newNote") as HTMLInputElement;
+          if (!input.value.trim() || !recipientDetailId || !userId) return;
+          const { data, error } = await supabase.from("recipient_notes").insert({ recipient_id: recipientDetailId, user_id: userId, content: input.value.trim(), source: "user" }).select().single<RecipientNote>();
+          if (!error && data) { setRecipientNotes(prev => [data, ...prev]); input.value = ""; }
+        }} className="flex gap-2 mb-4">
+          <input name="newNote" type="text" placeholder="情報を追加..." className="flex-1 px-3 py-2 text-sm border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring/20" />
+          <button type="submit" className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-md hover:opacity-90 transition-opacity shrink-0">追加</button>
+        </form>
+
         {recipientNotes.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-8">まだ記録がありません。チャットで相談するとAIが自動的に記録します。</p>
         ) : (
           <div className="space-y-2">
             {recipientNotes.map(note => (
-              <div key={note.id} className="flex items-start gap-2 text-sm px-3 py-2 bg-muted/30 rounded-md">
-                <span className="text-muted-foreground mt-0.5">&#8226;</span>
-                <div className="flex-1">
-                  <span>{note.content}</span>
-                  <span className="text-[10px] text-muted-foreground ml-2">{new Date(note.created_at).toLocaleDateString("ja-JP")}</span>
+              <div key={note.id} className="group flex items-start gap-2 p-3 border border-border rounded-lg hover:bg-muted/30 transition-colors">
+                <div className="flex-1 min-w-0">
+                  <form onSubmit={async (e) => {
+                    e.preventDefault();
+                    const input = (e.target as HTMLFormElement).elements.namedItem(`note-${note.id}`) as HTMLInputElement;
+                    const { error } = await supabase.from("recipient_notes").update({ content: input.value }).eq("id", note.id);
+                    if (!error) setRecipientNotes(prev => prev.map(n => n.id === note.id ? { ...n, content: input.value } : n));
+                  }} className="flex items-start gap-2">
+                    <input name={`note-${note.id}`} type="text" defaultValue={note.content} className="flex-1 px-2 py-1 text-sm bg-transparent border-0 border-b border-transparent hover:border-input focus:border-input focus:outline-none transition-colors" />
+                    <button type="submit" className="px-2 py-1 text-xs text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0">保存</button>
+                  </form>
+                  <div className="flex items-center gap-2 mt-1 px-2">
+                    <span className="text-[10px] text-muted-foreground">{note.source === "ai" ? "AI" : "手動"}</span>
+                    <span className="text-[10px] text-muted-foreground">{new Date(note.created_at).toLocaleDateString("ja-JP")}</span>
+                  </div>
                 </div>
+                <button onClick={async () => {
+                  const { error } = await supabase.from("recipient_notes").delete().eq("id", note.id);
+                  if (!error) setRecipientNotes(prev => prev.filter(n => n.id !== note.id));
+                }} className="p-1 text-muted-foreground hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all shrink-0" title="削除">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                </button>
               </div>
             ))}
           </div>
@@ -397,7 +426,7 @@ export default function MyPage() {
       </Modal>
 
       {/* 受け手 提案履歴 モーダル */}
-      <Modal open={recipientProposalsModalOpen} onClose={() => setRecipientProposalsModalOpen(false)} title={`${selectedRecipient?.nickname ?? ""} — 提案履歴`}>
+      <Modal open={recipientProposalsModalOpen} onClose={() => { setRecipientProposalsModalOpen(false); }} onBack={() => setRecipientProposalsModalOpen(false)} title={`${selectedRecipient?.nickname ?? ""} — 提案履歴`}>
         {recipientProposals.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-8">まだ提案がありません。</p>
         ) : (

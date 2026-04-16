@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef } from "react";
 
-export function Modal({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
+export function Modal({ open, onClose, onBack, title, children }: { open: boolean; onClose: () => void; onBack?: () => void; title: string; children: React.ReactNode }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -18,7 +18,14 @@ export function Modal({ open, onClose, title, children }: { open: boolean; onClo
     >
       <div className="flex flex-col max-h-[85vh]">
         <div className="flex justify-between items-center px-6 py-4 border-b border-border shrink-0 bg-white">
-          <h3 className="text-lg font-semibold">{title}</h3>
+          <div className="flex items-center gap-2">
+            {onBack && (
+              <button onClick={onBack} className="text-muted-foreground hover:text-foreground p-1">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+              </button>
+            )}
+            <h3 className="text-lg font-semibold">{title}</h3>
+          </div>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground p-1">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
           </button>
