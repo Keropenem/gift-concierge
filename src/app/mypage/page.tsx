@@ -31,7 +31,7 @@ export default function MyPage() {
   const [recipientProposals, setRecipientProposals] = useState<Proposal[]>([]);
 
   // Profile form state
-  const [profileForm, setProfileForm] = useState({ age: "", gender: "", occupation: "", interests: "", strengths: "" });
+  const [profileForm, setProfileForm] = useState({ name: "", age: "", gender: "", occupation: "", interests: "", strengths: "" });
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileMsg, setProfileMsg] = useState("");
 
@@ -57,6 +57,7 @@ export default function MyPage() {
     if (pRes.data) {
       setProfile(pRes.data);
       setProfileForm({
+        name: pRes.data.name ?? "",
         age: String(pRes.data.age ?? ""),
         gender: pRes.data.gender ?? "",
         occupation: pRes.data.occupation ?? "",
@@ -78,6 +79,7 @@ export default function MyPage() {
     setProfileSaving(true);
     setProfileMsg("");
     const updates: Record<string, unknown> = {};
+    updates.name = profileForm.name || null;
     if (profileForm.age) updates.age = Number(profileForm.age);
     else updates.age = null;
     updates.gender = profileForm.gender || null;
@@ -203,6 +205,11 @@ export default function MyPage() {
 
           <form onSubmit={handleProfileSave} className="flex flex-col gap-3">
             <div className="text-xs text-muted-foreground">{profile?.email}</div>
+
+            <div>
+              <label htmlFor="name" className="block text-xs font-medium mb-1 text-muted-foreground">お名前</label>
+              <input id="name" type="text" value={profileForm.name} onChange={e => setProfileForm(p => ({ ...p, name: e.target.value }))} placeholder="表示名を入力" className="w-full px-3 py-2 text-sm border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring/20" />
+            </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>

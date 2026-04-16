@@ -3,6 +3,7 @@
 export interface Profile {
   id: string;
   email: string;
+  name: string | null;
   age: number | null;
   gender: string | null;
   occupation: string | null;

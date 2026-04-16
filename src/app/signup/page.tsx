@@ -21,6 +21,7 @@ export default function SignupPage() {
     const age = parseInt(formData.get("age") as string) || null;
     const gender = formData.get("gender") as string;
     const occupation = formData.get("occupation") as string;
+    const name = formData.get("name") as string;
     const interestsRaw = formData.get("interests") as string;
     const strengthsRaw = formData.get("strengths") as string;
 
@@ -49,7 +50,7 @@ export default function SignupPage() {
 
       await supabase
         .from("profiles")
-        .update({ age, gender, occupation, interests, strengths })
+        .update({ name, age, gender, occupation, interests, strengths })
         .eq("id", data.user.id);
     }
 
@@ -108,6 +109,20 @@ export default function SignupPage() {
           <hr className="my-2" />
 
           {/* プロフィール情報 */}
+          <div>
+            <label htmlFor="name" className="block text-sm font-medium mb-1">
+              お名前 <span className="text-red-500">*</span>
+            </label>
+            <input
+              id="name"
+              name="name"
+              type="text"
+              required
+              className="w-full px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring/20"
+              placeholder="例: 田中太郎"
+            />
+          </div>
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label htmlFor="age" className="block text-sm font-medium mb-1">
