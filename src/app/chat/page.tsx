@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import { createClient } from "@/lib/supabase/client";
-import type { ChatMessage, Profile, Recipient } from "@/lib/types";
+import type { ChatMessage, Profile, Recipient, Memory } from "@/lib/types";
 
 export default function ChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -15,6 +15,7 @@ export default function ChatPage() {
   const [recipients, setRecipients] = useState<Recipient[]>([]);
   const [selectedRecipient, setSelectedRecipient] = useState<Recipient | null>(null);
   const [showRecipientPicker, setShowRecipientPicker] = useState(false);
+  const [userMemories, setUserMemories] = useState<Memory[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
   const [initialized, setInitialized] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -52,6 +53,13 @@ export default function ChatPage() {
         setRecipients(recipientData);
         setShowRecipientPicker(true);
       }
+
+      const { data: memoryData } = await supabase
+        .from("memories")
+        .select("*")
+        .eq("user_id", user.id);
+
+      if (memoryData) setUserMemories(memoryData);
     }
 
     setInitialized(true);
@@ -81,11 +89,12 @@ export default function ChatPage() {
     try {
       const body: Record<string, unknown> = { message: text };
 
-      // 初回メッセージ時にプロフィール情報を添付
+      // 初回メッセージ時にプロフィール・メモリ情報を添付
       if (messages.length === 0) {
         if (profile) body.profile = profile;
         if (selectedRecipient) body.recipient = selectedRecipient;
         if (userId) body.userId = userId;
+        if (userMemories.length > 0) body.memories = userMemories;
       }
 
       const res = await fetch("/api/chat", {

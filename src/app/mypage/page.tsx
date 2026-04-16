@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { logout, updateProfile, deleteRecipient, updateRecipient } from "@/app/auth/actions";
-import type { Profile, Recipient } from "@/lib/types";
+import { logout, updateProfile, deleteRecipient, updateRecipient, deleteMemory, updateMemory, addMemory } from "@/app/auth/actions";
+import type { Profile, Recipient, Memory } from "@/lib/types";
 
 const genderLabel: Record<string, string> = {
   male: "男性",
@@ -33,6 +33,13 @@ export default async function MyPage() {
     .eq("user_id", user.id)
     .order("updated_at", { ascending: false })
     .returns<Recipient[]>();
+
+  const { data: memories } = await supabase
+    .from("memories")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false })
+    .returns<Memory[]>();
 
   return (
     <div className="flex flex-col flex-1 min-h-screen">
@@ -158,6 +165,90 @@ export default async function MyPage() {
               保存
             </button>
           </form>
+        </section>
+
+        {/* メモリ（AIが学んだこと） */}
+        <section>
+          <div className="flex items-center gap-2 mb-1">
+            <h2 className="text-lg font-semibold">メモリ</h2>
+            <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">
+              {memories?.length ?? 0}件
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground mb-4">
+            AIとの会話から自動的に記録された情報です。編集・削除したり、自分で追加もできます。
+          </p>
+
+          {/* 新規追加 */}
+          <form action={addMemory} className="flex gap-2 mb-4">
+            <input
+              name="content"
+              type="text"
+              placeholder="自分で情報を追加...（例: 和食より洋食が好き）"
+              className="flex-1 px-3 py-2 text-sm border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring/20"
+            />
+            <button
+              type="submit"
+              className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-md hover:opacity-90 transition-opacity shrink-0"
+            >
+              追加
+            </button>
+          </form>
+
+          {(!memories || memories.length === 0) ? (
+            <div className="text-center py-6 text-sm text-muted-foreground border border-dashed border-border rounded-lg">
+              まだメモリがありません。
+              <br />
+              チャットで相談すると、AIが自動的に情報を記録します。
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {memories.map((m) => (
+                <div
+                  key={m.id}
+                  className="group flex items-start gap-2 p-3 border border-border rounded-lg hover:bg-muted/30 transition-colors"
+                >
+                  <div className="flex-1 min-w-0">
+                    <form action={updateMemory} className="flex items-start gap-2">
+                      <input type="hidden" name="memoryId" value={m.id} />
+                      <input
+                        name="content"
+                        type="text"
+                        defaultValue={m.content}
+                        className="flex-1 px-2 py-1 text-sm bg-transparent border-0 border-b border-transparent hover:border-input focus:border-input focus:outline-none transition-colors"
+                      />
+                      <button
+                        type="submit"
+                        className="px-2 py-1 text-xs text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        保存
+                      </button>
+                    </form>
+                    <div className="flex items-center gap-2 mt-1 px-2">
+                      <span className="text-[10px] text-muted-foreground">
+                        {m.source === "ai" ? "AI" : "手動"}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {new Date(m.created_at).toLocaleDateString("ja-JP")}
+                      </span>
+                    </div>
+                  </div>
+                  <form action={deleteMemory}>
+                    <input type="hidden" name="memoryId" value={m.id} />
+                    <button
+                      type="submit"
+                      className="p-1 text-muted-foreground hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                      title="削除"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+                      </svg>
+                    </button>
+                  </form>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
 
         {/* 贈った相手リスト */}

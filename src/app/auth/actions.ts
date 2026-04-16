@@ -101,6 +101,69 @@ export async function deleteRecipient(formData: FormData): Promise<void> {
   revalidatePath("/mypage");
 }
 
+export async function deleteMemory(formData: FormData): Promise<void> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  const memoryId = formData.get("memoryId") as string;
+
+  await supabase
+    .from("memories")
+    .delete()
+    .eq("id", memoryId)
+    .eq("user_id", user.id);
+
+  revalidatePath("/mypage");
+}
+
+export async function updateMemory(formData: FormData): Promise<void> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  const memoryId = formData.get("memoryId") as string;
+  const content = formData.get("content") as string;
+
+  await supabase
+    .from("memories")
+    .update({ content, source: "user" })
+    .eq("id", memoryId)
+    .eq("user_id", user.id);
+
+  revalidatePath("/mypage");
+}
+
+export async function addMemory(formData: FormData): Promise<void> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  const content = formData.get("content") as string;
+  if (!content.trim()) return;
+
+  await supabase
+    .from("memories")
+    .insert({ user_id: user.id, content: content.trim(), source: "user" });
+
+  revalidatePath("/mypage");
+}
+
 export async function updateRecipient(formData: FormData): Promise<void> {
   const supabase = await createClient();
   const {

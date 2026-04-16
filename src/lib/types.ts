@@ -38,6 +38,15 @@ export interface Recipient {
   updated_at: string;
 }
 
+export interface Memory {
+  id: string;
+  user_id: string;
+  content: string;
+  source: "ai" | "user";
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ClickLog {
   id: string;
   user_id: string | null;
