@@ -144,14 +144,20 @@ export default function ChatPage() {
       });
 
       const data = await res.json();
+      console.log("[DEBUG response]", JSON.stringify(data._debug));
 
       if (data.session_id) {
         setSessionId(data.session_id);
       }
 
+      // デバッグ情報をAI応答の末尾に一時的に追加
+      const debugInfo = data._debug
+        ? `\n\n---\n[DEBUG] userId=${data._debug.userId || "NULL"} | hasServiceKey=${data._debug.hasServiceKey} | historyLen=${data._debug.historyLen} | sender=${JSON.stringify(data._debug.senderData)} | recipient=${JSON.stringify(data._debug.recipientData)}`
+        : "";
+
       const assistantMessage: ChatMessage = {
         role: "assistant",
-        content: data.reply,
+        content: data.reply + debugInfo,
         timestamp: new Date().toISOString(),
       };
 
@@ -226,14 +232,14 @@ export default function ChatPage() {
         </div>
       </header>
 
-      {/* デバッグバナー（一時的） */}
-      <div className="bg-yellow-100 text-yellow-800 text-xs px-4 py-2 border-b border-yellow-300">
-        <strong>DEBUG:</strong>{" "}
-        userId={userId || userIdRef.current || "null"} |{" "}
-        profile={profile?.occupation || profileRef.current?.occupation || "null"} |{" "}
-        age={profile?.age || profileRef.current?.age || "null"} |{" "}
-        memories={userMemories.length || userMemoriesRef.current.length} |{" "}
-        recipients={recipients.length}
+      {/* デバッグバナー（一時的・インラインスタイルで強制表示） */}
+      <div style={{ background: "#fef3c7", color: "#92400e", fontSize: "12px", padding: "8px 16px", borderBottom: "1px solid #fcd34d" }}>
+        <b>DEBUG v2:</b>{" "}
+        userId={userId || userIdRef.current || "NULL"} |{" "}
+        profile.occ={profile?.occupation || profileRef.current?.occupation || "NULL"} |{" "}
+        profile.age={String(profile?.age || profileRef.current?.age || "NULL")} |{" "}
+        mem={String(userMemories.length)} |{" "}
+        recip={String(recipients.length)}
       </div>
 
       {/* チャットメッセージエリア */}

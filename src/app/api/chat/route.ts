@@ -291,8 +291,15 @@ export async function POST(request: NextRequest) {
   const { message, profile, recipient, userId, memories: userMemories } = body;
   const sessionId = request.headers.get("x-session-id") || crypto.randomUUID();
 
-  console.log("[CHAT] sessionId:", sessionId.substring(0, 8), "userId:", userId || "NONE", "isNewSession:", !sessions.has(sessionId));
-  console.log("[CHAT] hasProfile:", !!profile, "hasRecipient:", !!recipient, "memoriesCount:", userMemories?.length ?? 0);
+  console.log("[CHAT] === NEW REQUEST ===");
+  console.log("[CHAT] body keys:", Object.keys(body));
+  console.log("[CHAT] message:", message?.substring(0, 50));
+  console.log("[CHAT] userId:", userId || "MISSING");
+  console.log("[CHAT] profile:", profile ? JSON.stringify({ age: profile.age, occ: profile.occupation }) : "MISSING");
+  console.log("[CHAT] recipient:", recipient ? "YES" : "MISSING");
+  console.log("[CHAT] memories:", userMemories?.length ?? "MISSING");
+  console.log("[CHAT] serviceRoleKey:", !!serviceRoleKey);
+  console.log("[CHAT] sessionId:", sessionId.substring(0, 8), "isNew:", !sessions.has(sessionId));
 
   cleanupSessions();
 
