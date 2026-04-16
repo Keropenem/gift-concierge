@@ -279,7 +279,7 @@ export default function MyPage() {
       </Modal>
 
       {/* 受け手一覧モーダル */}
-      <Modal open={recipientModalOpen && !recipientDetailId} onClose={() => setRecipientModalOpen(false)} title={`贈った相手 (${recipients.length}人)`}>
+      <Modal open={recipientModalOpen} onClose={() => { setRecipientModalOpen(false); setRecipientDetailId(null); setRecipientNotesModalOpen(false); setRecipientProposalsModalOpen(false); }} title={`贈った相手 (${recipients.length}人)`}>
         <p className="text-xs text-muted-foreground mb-4">チャットで教えた相手の情報が自動保存されます。クリックで詳細を表示。</p>
 
         {recipients.length === 0 ? (

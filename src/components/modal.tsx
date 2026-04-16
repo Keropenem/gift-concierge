@@ -1,9 +1,13 @@
 "use client";
 import { useEffect, useRef, useCallback } from "react";
 
+// グローバルなモーダルスタック — 最後に開いたモーダルだけがブラウザバックに反応
+const modalStack: Array<() => void> = [];
+
 export function Modal({ open, onClose, onBack, title, children }: { open: boolean; onClose: () => void; onBack?: () => void; title: string; children: React.ReactNode }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const wasOpen = useRef(false);
+  const openRef = useRef(false);
+  const stackEntryRef = useRef<(() => void) | null>(null);
 
   const handleBack = useCallback(() => {
     if (onBack) onBack();
@@ -11,31 +15,50 @@ export function Modal({ open, onClose, onBack, title, children }: { open: boolea
   }, [onBack, onClose]);
 
   useEffect(() => {
-    if (open && !wasOpen.current) {
-      dialogRef.current?.showModal();
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    if (open && !openRef.current) {
+      dialog.showModal();
       history.pushState({ modal: true }, "");
-      wasOpen.current = true;
-    } else if (!open && wasOpen.current) {
-      dialogRef.current?.close();
-      wasOpen.current = false;
+      openRef.current = true;
+
+      // スタックに追加
+      stackEntryRef.current = handleBack;
+      modalStack.push(handleBack);
+    } else if (!open && openRef.current) {
+      if (dialog.open) dialog.close();
+      openRef.current = false;
+
+      // スタックから除去
+      const idx = modalStack.indexOf(stackEntryRef.current!);
+      if (idx !== -1) modalStack.splice(idx, 1);
+      stackEntryRef.current = null;
     }
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-
-    const onPopState = () => {
-      handleBack();
-    };
-
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
   }, [open, handleBack]);
+
+  // cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (stackEntryRef.current) {
+        const idx = modalStack.indexOf(stackEntryRef.current);
+        if (idx !== -1) modalStack.splice(idx, 1);
+      }
+    };
+  }, []);
 
   return (
     <dialog
       ref={dialogRef}
-      onClose={onClose}
+      onClose={() => {
+        if (openRef.current) {
+          openRef.current = false;
+          const idx = modalStack.indexOf(stackEntryRef.current!);
+          if (idx !== -1) modalStack.splice(idx, 1);
+          stackEntryRef.current = null;
+          onClose();
+        }
+      }}
       style={{ margin: "auto" }}
       className="backdrop:bg-black/50 rounded-lg p-0 w-full max-w-2xl max-h-[85vh] overflow-hidden"
     >
@@ -57,4 +80,14 @@ export function Modal({ open, onClose, onBack, title, children }: { open: boolea
       </div>
     </dialog>
   );
+}
+
+// ページレベルでpopstateを1回だけ登録
+if (typeof window !== "undefined") {
+  window.addEventListener("popstate", () => {
+    if (modalStack.length > 0) {
+      const topHandler = modalStack[modalStack.length - 1];
+      topHandler();
+    }
+  });
 }
