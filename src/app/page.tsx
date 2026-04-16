@@ -7,6 +7,30 @@ export default async function Home() {
     data: { user },
   } = await supabase.auth.getUser();
 
+  // ログイン済みなら過去のセッションを取得
+  let sessions: Array<{ id: string; created_at: string; preview: string; messageCount: number }> = [];
+  if (user) {
+    const { data } = await supabase
+      .from("sessions")
+      .select("id, created_at, messages")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(10);
+
+    if (data) {
+      sessions = data.map((s: { id: string; created_at: string; messages: Array<{ role: string; parts: Array<{ text: string }> }> }) => {
+        const firstUserMsg = s.messages?.find((m: { role: string }) => m.role === "user");
+        const preview = firstUserMsg?.parts?.[0]?.text?.substring(0, 60) || "新しい相談";
+        return {
+          id: s.id,
+          created_at: s.created_at,
+          preview,
+          messageCount: s.messages?.length || 0,
+        };
+      });
+    }
+  }
+
   return (
     <div className="flex flex-col flex-1 items-center justify-center min-h-screen">
       {/* ナビゲーション */}
@@ -44,7 +68,7 @@ export default async function Home() {
         )}
       </nav>
 
-      {/* メインコンテンツ: Google検索風ミニマルUI */}
+      {/* メインコンテンツ */}
       <main className="flex flex-col items-center gap-8 w-full max-w-2xl px-4">
         {/* ロゴ */}
         <div className="text-center">
@@ -54,7 +78,7 @@ export default async function Home() {
           </p>
         </div>
 
-        {/* 検索窓（チャット入力欄） */}
+        {/* 検索窓 */}
         <form action="/chat" className="w-full">
           <div className="relative w-full">
             <input
@@ -86,6 +110,27 @@ export default async function Home() {
             </button>
           </div>
         </form>
+
+        {/* 過去の相談一覧 */}
+        {sessions.length > 0 && (
+          <div className="w-full mt-4">
+            <p className="text-xs font-medium text-muted-foreground mb-3">最近の相談</p>
+            <div className="flex flex-col gap-1">
+              {sessions.map((s) => (
+                <Link
+                  key={s.id}
+                  href={`/chat?resume=${s.id}`}
+                  className="flex justify-between items-center px-4 py-2.5 text-sm rounded-lg hover:bg-muted transition-colors"
+                >
+                  <span className="truncate flex-1 text-foreground">{s.preview}</span>
+                  <span className="text-xs text-muted-foreground ml-3 shrink-0">
+                    {new Date(s.created_at).toLocaleDateString("ja-JP")}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
       </main>
 
       {/* フッター */}

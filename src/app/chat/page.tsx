@@ -98,11 +98,17 @@ export default function ChatPage() {
     setInitialized(true);
 
     const params = new URLSearchParams(window.location.search);
+
+    // セッション再開
+    const resumeId = params.get("resume");
+    if (resumeId) {
+      await resumeSession(resumeId);
+      setInitialized(true);
+      return;
+    }
+
     const initialQuery = params.get("q");
     if (initialQuery) {
-      console.log("[DEBUG] initialQuery from URL:", initialQuery);
-      console.log("[DEBUG] profileRef at sendMessage time:", JSON.stringify(profileRef.current));
-      console.log("[DEBUG] userIdRef at sendMessage time:", userIdRef.current);
       sendMessage(initialQuery);
     }
   }
