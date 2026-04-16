@@ -190,25 +190,45 @@ const proposalTool = {
   },
 };
 
-// インメモリセッション管理
+// セッション管理（Supabase永続化）
 interface SessionData {
+  id: string;
   history: Array<{ role: string; parts: Array<{ text: string }> }>;
-  lastAccess: number;
   userId: string | null;
   senderData: Record<string, unknown>;
   recipientData: Record<string, unknown>;
 }
 
-const sessions = new Map<string, SessionData>();
-const SESSION_TTL = 3600000;
+async function loadSession(sessionId: string): Promise<SessionData | null> {
+  const { data } = await supabase
+    .from("sessions")
+    .select("*")
+    .eq("id", sessionId)
+    .single();
 
-function cleanupSessions() {
-  const now = Date.now();
-  for (const [id, session] of sessions) {
-    if (now - session.lastAccess > SESSION_TTL) {
-      sessions.delete(id);
-    }
-  }
+  if (!data) return null;
+
+  return {
+    id: data.id,
+    history: (data.messages || []) as SessionData["history"],
+    userId: data.user_id,
+    senderData: (data.profile_input || {}) as Record<string, unknown>,
+    recipientData: (data.target_input || {}) as Record<string, unknown>,
+  };
+}
+
+async function saveSession(session: SessionData): Promise<void> {
+  const { error } = await supabase
+    .from("sessions")
+    .upsert({
+      id: session.id,
+      user_id: session.userId,
+      messages: session.history,
+      profile_input: session.senderData,
+      target_input: session.recipientData,
+    });
+
+  if (error) console.error("[SESSION] save error:", error.message);
 }
 
 function mergeData(existing: Record<string, unknown>, incoming: Record<string, unknown>): Record<string, unknown> {
@@ -445,21 +465,15 @@ export async function POST(request: NextRequest) {
   const sessionId = request.headers.get("x-session-id") || crypto.randomUUID();
 
   console.log("[CHAT] === NEW REQUEST ===");
-  console.log("[CHAT] body keys:", Object.keys(body));
-  console.log("[CHAT] message:", message?.substring(0, 50));
-  console.log("[CHAT] userId:", userId || "MISSING");
-  console.log("[CHAT] profile:", profile ? JSON.stringify({ age: profile.age, occ: profile.occupation }) : "MISSING");
-  console.log("[CHAT] recipient:", recipient ? "YES" : "MISSING");
-  console.log("[CHAT] memories:", userMemories?.length ?? "MISSING");
-  console.log("[CHAT] serviceRoleKey:", !!serviceRoleKey);
-  console.log("[CHAT] sessionId:", sessionId.substring(0, 8), "isNew:", !sessions.has(sessionId));
+  console.log("[CHAT] sessionId:", sessionId.substring(0, 8), "userId:", userId || "MISSING");
 
-  cleanupSessions();
+  // セッション取得 or 新規作成
+  let session = await loadSession(sessionId);
 
-  if (!sessions.has(sessionId)) {
+  if (!session) {
+    // 新規セッション
     const contextParts: string[] = [];
 
-    // メモリを注入
     if (userMemories && Array.isArray(userMemories) && userMemories.length > 0) {
       contextParts.push(
         `【過去の会話から記録された情報】\n` +
@@ -491,20 +505,17 @@ export async function POST(request: NextRequest) {
       ? contextParts.join("\n\n") + "\n\n" + message
       : message;
 
-    sessions.set(sessionId, {
+    session = {
+      id: sessionId,
       history: [{ role: "user", parts: [{ text: firstMessage }] }],
-      lastAccess: Date.now(),
       userId: userId || null,
       senderData: profile || {},
       recipientData: recipient || {},
-    });
+    };
   } else {
-    const session = sessions.get(sessionId)!;
-    session.lastAccess = Date.now();
+    // 既存セッション
     session.history.push({ role: "user", parts: [{ text: message }] });
   }
-
-  const session = sessions.get(sessionId)!;
 
   try {
     // DBからクライアント編集可能プロンプトを取得し、システム必須部分と合体
@@ -524,6 +535,9 @@ export async function POST(request: NextRequest) {
     const reply = response.text ?? "申し訳ありません。回答を生成できませんでした。";
 
     session.history.push({ role: "model", parts: [{ text: reply }] });
+
+    // セッションをSupabaseに保存
+    await saveSession(session);
 
     // 2段階目: 情報抽出（同期実行 — Vercelサーバーレスではバックグラウンド処理が死ぬため）
     console.log("[EXTRACT] userId:", session.userId || "NONE", "historyLen:", session.history.length);

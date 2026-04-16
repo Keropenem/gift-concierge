@@ -18,6 +18,8 @@ export default function ChatPage() {
   const [userMemories, setUserMemories] = useState<Memory[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
   const [initialized, setInitialized] = useState(false);
+  const [pastSessions, setPastSessions] = useState<Array<{ id: string; created_at: string; preview: string; messageCount: number }>>([]);
+  const [showHistory, setShowHistory] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -84,6 +86,11 @@ export default function ChatPage() {
         setUserMemories(memoryData);
         userMemoriesRef.current = memoryData;
       }
+
+      // 過去のセッション一覧を取得
+      const sessionsRes = await fetch(`/api/sessions?userId=${user.id}`);
+      const sessionsData = await sessionsRes.json();
+      if (sessionsData.sessions) setPastSessions(sessionsData.sessions);
     } else {
       console.log("[DEBUG] user is null — not logged in");
     }
@@ -189,6 +196,22 @@ export default function ChatPage() {
     el.style.height = Math.min(el.scrollHeight, 200) + "px";
   }
 
+  async function resumeSession(sid: string) {
+    const res = await fetch(`/api/chat/session?id=${sid}`);
+    const data = await res.json();
+    if (data.messages) {
+      const chatMessages: ChatMessage[] = data.messages.map((m: { role: string; parts: Array<{ text: string }> }, i: number) => ({
+        role: m.role === "model" ? "assistant" as const : "user" as const,
+        content: m.parts?.[0]?.text || "",
+        timestamp: new Date(Date.now() - (data.messages.length - i) * 1000).toISOString(),
+      }));
+      setMessages(chatMessages);
+      setSessionId(sid);
+      setShowHistory(false);
+      setShowRecipientPicker(false);
+    }
+  }
+
   function handleNewChat() {
     setMessages([]);
     setSessionId(null);
@@ -217,6 +240,14 @@ export default function ChatPage() {
               {profile.email}
             </span>
           )}
+          {pastSessions.length > 0 && (
+            <button
+              onClick={() => setShowHistory(!showHistory)}
+              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              履歴 ({pastSessions.length})
+            </button>
+          )}
           <Link
             href="/admin/prompt"
             className="text-sm text-muted-foreground hover:text-foreground transition-colors"
@@ -231,6 +262,29 @@ export default function ChatPage() {
           </button>
         </div>
       </header>
+
+      {/* 履歴パネル */}
+      {showHistory && (
+        <div className="border-b border-border px-4 py-3 max-h-60 overflow-y-auto">
+          <div className="max-w-2xl mx-auto">
+            <p className="text-xs font-medium text-muted-foreground mb-2">過去の相談</p>
+            <div className="flex flex-col gap-1">
+              {pastSessions.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => resumeSession(s.id)}
+                  className="flex justify-between items-center px-3 py-2 text-sm text-left rounded-md hover:bg-muted transition-colors"
+                >
+                  <span className="truncate flex-1">{s.preview}</span>
+                  <span className="text-xs text-muted-foreground ml-2 shrink-0">
+                    {new Date(s.created_at).toLocaleDateString("ja-JP")} ({s.messageCount}通)
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* チャットメッセージエリア */}
       <div className="flex-1 overflow-y-auto px-4 py-6">
