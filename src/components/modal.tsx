@@ -10,9 +10,13 @@ export function Modal({ open, onClose, onBack, title, children }: { open: boolea
   const stackEntryRef = useRef<(() => void) | null>(null);
 
   const handleBack = useCallback(() => {
-    if (onBack) onBack();
-    else onClose();
-  }, [onBack, onClose]);
+    if (onBack) {
+      onBack();
+    } else {
+      // 最外側モーダル: ブラウザバックでは閉じない。historyを元に戻す
+      history.pushState({ modal: true }, "");
+    }
+  }, [onBack]);
 
   useEffect(() => {
     const dialog = dialogRef.current;
