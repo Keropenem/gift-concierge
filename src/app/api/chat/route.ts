@@ -4,10 +4,12 @@ import { createClient } from "@supabase/supabase-js";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
-// service_role keyでRLSをバイパス（サーバー側専用、ブラウザに露出しない）
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+console.log("[INIT] SUPABASE_SERVICE_ROLE_KEY present:", !!serviceRoleKey, serviceRoleKey ? `starts with: ${serviceRoleKey.substring(0, 15)}...` : "MISSING");
+
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  serviceRoleKey || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
 const SYSTEM_PROMPT = `あなたは世界最高のギフトコンシェルジュであり、優れたストーリーテラーです。
@@ -158,7 +160,8 @@ async function saveToSupabase(userId: string, senderData: Record<string, unknown
   if (senderData.strengths) senderUpdate.strengths = senderData.strengths;
 
   if (Object.keys(senderUpdate).length > 0) {
-    await supabase.from("profiles").update(senderUpdate).eq("id", userId);
+    const { error } = await supabase.from("profiles").update(senderUpdate).eq("id", userId);
+    console.log("[DB] profiles update:", error ? `ERROR: ${error.message}` : "OK", JSON.stringify(senderUpdate));
   }
 
   if (recipientData.nickname) {
@@ -178,9 +181,11 @@ async function saveToSupabase(userId: string, senderData: Record<string, unknown
     if (recipientData.strengths) recipientRow.strengths = recipientData.strengths;
 
     if (existing) {
-      await supabase.from("recipients").update(recipientRow).eq("id", existing.id);
+      const { error } = await supabase.from("recipients").update(recipientRow).eq("id", existing.id);
+      console.log("[DB] recipients update:", error ? `ERROR: ${error.message}` : "OK");
     } else {
-      await supabase.from("recipients").insert(recipientRow);
+      const { error } = await supabase.from("recipients").insert(recipientRow);
+      console.log("[DB] recipients insert:", error ? `ERROR: ${error.message}` : "OK", JSON.stringify(recipientRow));
     }
   }
 }
@@ -202,8 +207,10 @@ async function saveMemories(userId: string, memories: string[]) {
   const newRows = rows.filter((r) => !existingContents.has(r.content));
 
   if (newRows.length > 0) {
-    await supabase.from("memories").insert(newRows);
-    console.log("Saved memories:", newRows.map((r) => r.content));
+    const { error } = await supabase.from("memories").insert(newRows);
+    console.log("[DB] memories insert:", error ? `ERROR: ${error.message}` : "OK", newRows.map((r) => r.content));
+  } else {
+    console.log("[DB] memories: no new entries to save");
   }
 }
 
@@ -226,6 +233,8 @@ async function extractFromConversation(
       },
     ];
 
+    console.log("[EXTRACT_FN] calling Gemini for extraction, historyLen:", conversationHistory.length);
+
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: extractionPrompt,
@@ -235,6 +244,8 @@ async function extractFromConversation(
     });
 
     const parts = response.candidates?.[0]?.content?.parts || [];
+    console.log("[EXTRACT_FN] response parts:", parts.length, "functionCalls:", parts.filter(p => p.functionCall).map(p => p.functionCall?.name));
+
     for (const part of parts) {
       if (part.functionCall?.name === "save_profile_data") {
         const args = (part.functionCall.args || {}) as Record<string, unknown>;
@@ -280,6 +291,9 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   const { message, profile, recipient, userId, memories: userMemories } = body;
   const sessionId = request.headers.get("x-session-id") || crypto.randomUUID();
+
+  console.log("[CHAT] sessionId:", sessionId.substring(0, 8), "userId:", userId || "NONE", "isNewSession:", !sessions.has(sessionId));
+  console.log("[CHAT] hasProfile:", !!profile, "hasRecipient:", !!recipient, "memoriesCount:", userMemories?.length ?? 0);
 
   cleanupSessions();
 
@@ -349,17 +363,28 @@ export async function POST(request: NextRequest) {
     session.history.push({ role: "model", parts: [{ text: reply }] });
 
     // 2段階目: 情報抽出（同期実行 — Vercelサーバーレスではバックグラウンド処理が死ぬため）
+    console.log("[EXTRACT] userId:", session.userId || "NONE", "historyLen:", session.history.length);
     if (session.userId) {
       try {
         await extractFromConversation(session.history, session);
+        console.log("[EXTRACT] completed successfully");
       } catch (err) {
-        console.error("Extraction error:", err);
+        console.error("[EXTRACT] error:", err);
       }
+    } else {
+      console.log("[EXTRACT] skipped — no userId");
     }
 
     return NextResponse.json({
       reply,
       session_id: sessionId,
+      _debug: {
+        userId: session.userId || null,
+        hasServiceKey: !!serviceRoleKey,
+        historyLen: session.history.length,
+        senderData: session.senderData,
+        recipientData: session.recipientData,
+      },
     });
   } catch (error) {
     console.error("Gemini API error:", error);
