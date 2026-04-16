@@ -144,20 +144,14 @@ export default function ChatPage() {
       });
 
       const data = await res.json();
-      console.log("[DEBUG response]", JSON.stringify(data._debug));
 
       if (data.session_id) {
         setSessionId(data.session_id);
       }
 
-      // デバッグ情報をAI応答の末尾に一時的に追加
-      const debugInfo = data._debug
-        ? `\n\n---\n[DEBUG] userId=${data._debug.userId || "NULL"} | hasServiceKey=${data._debug.hasServiceKey} | historyLen=${data._debug.historyLen} | sender=${JSON.stringify(data._debug.senderData)} | recipient=${JSON.stringify(data._debug.recipientData)}`
-        : "";
-
       const assistantMessage: ChatMessage = {
         role: "assistant",
-        content: data.reply + debugInfo,
+        content: data.reply,
         timestamp: new Date().toISOString(),
       };
 
@@ -231,16 +225,6 @@ export default function ChatPage() {
           </button>
         </div>
       </header>
-
-      {/* デバッグバナー（一時的・インラインスタイルで強制表示） */}
-      <div style={{ background: "#fef3c7", color: "#92400e", fontSize: "12px", padding: "8px 16px", borderBottom: "1px solid #fcd34d" }}>
-        <b>DEBUG v2:</b>{" "}
-        userId={userId || userIdRef.current || "NULL"} |{" "}
-        profile.occ={profile?.occupation || profileRef.current?.occupation || "NULL"} |{" "}
-        profile.age={String(profile?.age || profileRef.current?.age || "NULL")} |{" "}
-        mem={String(userMemories.length)} |{" "}
-        recip={String(recipients.length)}
-      </div>
 
       {/* チャットメッセージエリア */}
       <div className="flex-1 overflow-y-auto px-4 py-6">

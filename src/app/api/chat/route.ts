@@ -5,7 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-console.log("[INIT] SUPABASE_SERVICE_ROLE_KEY present:", !!serviceRoleKey, serviceRoleKey ? `starts with: ${serviceRoleKey.substring(0, 15)}...` : "MISSING");
+console.log("[INIT] serviceRoleKey:", !!serviceRoleKey);
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
