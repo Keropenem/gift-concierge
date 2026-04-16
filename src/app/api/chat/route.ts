@@ -4,9 +4,10 @@ import { createClient } from "@supabase/supabase-js";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
+// service_role keyでRLSをバイパス（サーバー側専用、ブラウザに露出しない）
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
 const SYSTEM_PROMPT = `あなたは世界最高のギフトコンシェルジュであり、優れたストーリーテラーです。
@@ -347,10 +348,14 @@ export async function POST(request: NextRequest) {
 
     session.history.push({ role: "model", parts: [{ text: reply }] });
 
-    // 2段階目: バックグラウンドで情報抽出（Function Calling）
-    extractFromConversation(session.history, session).catch(
-      (err) => console.error("Background extraction error:", err)
-    );
+    // 2段階目: 情報抽出（同期実行 — Vercelサーバーレスではバックグラウンド処理が死ぬため）
+    if (session.userId) {
+      try {
+        await extractFromConversation(session.history, session);
+      } catch (err) {
+        console.error("Extraction error:", err);
+      }
+    }
 
     return NextResponse.json({
       reply,
