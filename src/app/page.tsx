@@ -12,12 +12,20 @@ export default async function Home() {
       {/* ナビゲーション */}
       <nav className="fixed top-0 w-full flex justify-end p-4 z-10">
         {user ? (
-          <Link
-            href="/mypage"
-            className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-          >
-            マイページ
-          </Link>
+          <div className="flex gap-4">
+            <Link
+              href="/admin/prompt"
+              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              プロンプト設定
+            </Link>
+            <Link
+              href="/mypage"
+              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              マイページ
+            </Link>
+          </div>
         ) : (
           <div className="flex gap-4">
             <Link

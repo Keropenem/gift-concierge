@@ -217,6 +217,12 @@ export default function ChatPage() {
               {profile.email}
             </span>
           )}
+          <Link
+            href="/admin/prompt"
+            className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            プロンプト設定
+          </Link>
           <button
             onClick={handleNewChat}
             className="text-sm text-muted-foreground hover:text-foreground transition-colors"
