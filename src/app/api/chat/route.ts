@@ -103,43 +103,56 @@ function buildSystemPrompt(clientPrompt: string): string {
   return clientPrompt + "\n" + SYSTEM_PROMPT_HIDDEN;
 }
 
+// 送り手の永続的な特徴をメモリに保存
 const memoriesTool = {
-  name: "save_memories",
-  description: "会話から分かったユーザーに関する情報を自由形式で記録する。好み・価値観・ライフスタイル・人間関係・エピソードなど、今後のギフト提案に役立つあらゆる情報を保存する。",
+  name: "save_sender_memories",
+  description: "贈り手（ユーザー自身）の永続的な性格・価値観・ライフスタイル・好みを記録する。次回以降の別の相手への提案にも活かせる普遍的な情報のみ。今回限りの条件（予算・きっかけ・季節等）は絶対に含めない。受け手の情報も含めない。",
   parameters: {
     type: Type.OBJECT,
     properties: {
       memories: {
         type: Type.ARRAY,
         items: { type: Type.STRING },
-        description: "記録する情報の配列。1つの情報につき1文で簡潔に。例: [\"ミニマルなデザインを好む\", \"犬を2匹飼っている\"]",
+        description: "贈り手自身の永続的な特徴のみ。例: [\"ミニマルなデザインを好む\", \"犬を2匹飼っている\", \"体験型のギフトを選ぶ傾向がある\"]。予算・きっかけ・受け手の情報は含めない。",
       },
     },
     required: ["memories"],
   },
 };
 
-const extractionTool = {
-  name: "save_profile_data",
-  description: "会話から判明した贈り手と受取り手のプロフィール情報を保存する",
+// 送り手の構造化プロフィール
+const senderProfileTool = {
+  name: "save_sender_profile",
+  description: "贈り手（ユーザー自身）の基本的な属性情報を保存する。受け手の情報は含めない。",
   parameters: {
     type: Type.OBJECT,
     properties: {
-      sender_age: { type: Type.INTEGER, description: "贈り手の年齢", nullable: true },
-      sender_gender: { type: Type.STRING, description: "贈り手の性別（male/female/other）", nullable: true },
-      sender_occupation: { type: Type.STRING, description: "贈り手の職業", nullable: true },
-      sender_interests: { type: Type.ARRAY, items: { type: Type.STRING }, description: "贈り手の趣味・関心事", nullable: true },
-      sender_strengths: { type: Type.ARRAY, items: { type: Type.STRING }, description: "贈り手の得意なこと", nullable: true },
-      recipient_nickname: { type: Type.STRING, description: "受取り手の呼び名", nullable: true },
-      recipient_relationship: { type: Type.STRING, description: "関係性", nullable: true },
-      recipient_age: { type: Type.INTEGER, description: "受取り手の年齢", nullable: true },
-      recipient_gender: { type: Type.STRING, description: "受取り手の性別", nullable: true },
-      recipient_occupation: { type: Type.STRING, description: "受取り手の職業", nullable: true },
-      recipient_interests: { type: Type.ARRAY, items: { type: Type.STRING }, description: "受取り手の趣味", nullable: true },
-      recipient_strengths: { type: Type.ARRAY, items: { type: Type.STRING }, description: "受取り手の得意なこと", nullable: true },
-      occasion: { type: Type.STRING, description: "贈り物のきっかけ", nullable: true },
+      age: { type: Type.INTEGER, description: "贈り手の年齢", nullable: true },
+      gender: { type: Type.STRING, description: "贈り手の性別（male/female/other）", nullable: true },
+      occupation: { type: Type.STRING, description: "贈り手の職業", nullable: true },
+      interests: { type: Type.ARRAY, items: { type: Type.STRING }, description: "贈り手の趣味・関心事", nullable: true },
+      strengths: { type: Type.ARRAY, items: { type: Type.STRING }, description: "贈り手の得意なこと", nullable: true },
     },
     required: [],
+  },
+};
+
+// 受け手の構造化プロフィール（人物ごとに保存）
+const recipientProfileTool = {
+  name: "save_recipient_profile",
+  description: "贈り物の受け手の情報を保存する。受け手ごとに呼び名で区別する。送り手との関係性もここに含める。予算やきっかけ等の今回限りの条件は含めない。",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      nickname: { type: Type.STRING, description: "受け手の呼び名（例: 父、母、田中さん）。必須。" },
+      relationship: { type: Type.STRING, description: "送り手との関係性（例: 父親、友人、同僚）", nullable: true },
+      age: { type: Type.INTEGER, description: "受け手の年齢", nullable: true },
+      gender: { type: Type.STRING, description: "受け手の性別（male/female/other）", nullable: true },
+      occupation: { type: Type.STRING, description: "受け手の職業", nullable: true },
+      interests: { type: Type.ARRAY, items: { type: Type.STRING }, description: "受け手の趣味・関心事", nullable: true },
+      strengths: { type: Type.ARRAY, items: { type: Type.STRING }, description: "受け手の得意なこと", nullable: true },
+    },
+    required: ["nickname"],
   },
 };
 
@@ -180,45 +193,6 @@ function mergeData(existing: Record<string, unknown>, incoming: Record<string, u
   return merged;
 }
 
-async function saveToSupabase(userId: string, senderData: Record<string, unknown>, recipientData: Record<string, unknown>) {
-  const senderUpdate: Record<string, unknown> = {};
-  if (senderData.age) senderUpdate.age = senderData.age;
-  if (senderData.gender) senderUpdate.gender = senderData.gender;
-  if (senderData.occupation) senderUpdate.occupation = senderData.occupation;
-  if (senderData.interests) senderUpdate.interests = senderData.interests;
-  if (senderData.strengths) senderUpdate.strengths = senderData.strengths;
-
-  if (Object.keys(senderUpdate).length > 0) {
-    const { error } = await supabase.from("profiles").update(senderUpdate).eq("id", userId);
-    console.log("[DB] profiles update:", error ? `ERROR: ${error.message}` : "OK", JSON.stringify(senderUpdate));
-  }
-
-  if (recipientData.nickname) {
-    const { data: existing } = await supabase
-      .from("recipients")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("nickname", recipientData.nickname as string)
-      .maybeSingle();
-
-    const recipientRow: Record<string, unknown> = { user_id: userId, nickname: recipientData.nickname };
-    if (recipientData.relationship) recipientRow.relationship = recipientData.relationship;
-    if (recipientData.age) recipientRow.age = recipientData.age;
-    if (recipientData.gender) recipientRow.gender = recipientData.gender;
-    if (recipientData.occupation) recipientRow.occupation = recipientData.occupation;
-    if (recipientData.interests) recipientRow.interests = recipientData.interests;
-    if (recipientData.strengths) recipientRow.strengths = recipientData.strengths;
-
-    if (existing) {
-      const { error } = await supabase.from("recipients").update(recipientRow).eq("id", existing.id);
-      console.log("[DB] recipients update:", error ? `ERROR: ${error.message}` : "OK");
-    } else {
-      const { error } = await supabase.from("recipients").insert(recipientRow);
-      console.log("[DB] recipients insert:", error ? `ERROR: ${error.message}` : "OK", JSON.stringify(recipientRow));
-    }
-  }
-}
-
 async function saveMemories(userId: string, memories: string[]) {
   const rows = memories.map((content) => ({
     user_id: userId,
@@ -243,7 +217,7 @@ async function saveMemories(userId: string, memories: string[]) {
   }
 }
 
-// 2段階目: 会話から情報を抽出（Function Calling、バックグラウンド）
+// 2段階目: 会話から情報を抽出（送り手/受け手/メモリを明確に分離）
 async function extractFromConversation(
   conversationHistory: Array<{ role: string; parts: Array<{ text: string }> }>,
   session: SessionData
@@ -254,10 +228,20 @@ async function extractFromConversation(
       {
         role: "user" as const,
         parts: [{
-          text: "ここまでの会話から判明した情報を記録してください。\n" +
-            "1. save_profile_data で贈り手・受取り手の構造化プロフィールを保存\n" +
-            "2. save_memories でそれ以外の有用な情報（好み・価値観・ライフスタイル・エピソード等）を自由形式で保存\n" +
-            "両方呼び出してください。"
+          text: `ここまでの会話から判明した情報を、以下の3つの関数で正確に分類して保存してください。
+
+【重要な分類ルール】
+1. save_sender_profile: 贈り手（ユーザー自身）の年齢・性別・職業・趣味・得意なこと。受け手の情報は絶対に含めない。
+2. save_recipient_profile: 受け手（贈る相手）の情報。nicknameは必須（例: 父、母、田中さん）。送り手との関係性もここ。送り手の情報は絶対に含めない。
+3. save_sender_memories: 贈り手の永続的な性格・価値観・ライフスタイルのみ。
+
+【絶対に保存しないもの】
+- 予算（毎回変わる）
+- 贈り物のきっかけ・イベント名（誕生日、お礼等 — 毎回変わる）
+- 季節や時期に関する情報
+- 今回の相談に固有の条件
+
+3つとも呼び出してください。該当情報がない関数はスキップしてOK。`
         }],
       },
     ];
@@ -268,7 +252,7 @@ async function extractFromConversation(
       model: "gemini-2.5-flash",
       contents: extractionPrompt,
       config: {
-        tools: [{ functionDeclarations: [extractionTool, memoriesTool] }],
+        tools: [{ functionDeclarations: [senderProfileTool, recipientProfileTool, memoriesTool] }],
       },
     });
 
@@ -276,43 +260,64 @@ async function extractFromConversation(
     console.log("[EXTRACT_FN] response parts:", parts.length, "functionCalls:", parts.filter(p => p.functionCall).map(p => p.functionCall?.name));
 
     for (const part of parts) {
-      if (part.functionCall?.name === "save_profile_data") {
+      if (part.functionCall?.name === "save_sender_profile") {
         const args = (part.functionCall.args || {}) as Record<string, unknown>;
+        console.log("[EXTRACT] sender profile:", JSON.stringify(args));
 
-        const senderNew: Record<string, unknown> = {};
-        if (args.sender_age) senderNew.age = args.sender_age;
-        if (args.sender_gender) senderNew.gender = args.sender_gender;
-        if (args.sender_occupation) senderNew.occupation = args.sender_occupation;
-        if (args.sender_interests) senderNew.interests = args.sender_interests;
-        if (args.sender_strengths) senderNew.strengths = args.sender_strengths;
-        session.senderData = mergeData(session.senderData, senderNew);
+        const senderUpdate: Record<string, unknown> = {};
+        if (args.age) senderUpdate.age = args.age;
+        if (args.gender) senderUpdate.gender = args.gender;
+        if (args.occupation) senderUpdate.occupation = args.occupation;
+        if (args.interests) senderUpdate.interests = args.interests;
+        if (args.strengths) senderUpdate.strengths = args.strengths;
 
-        const recipientNew: Record<string, unknown> = {};
-        if (args.recipient_nickname) recipientNew.nickname = args.recipient_nickname;
-        if (args.recipient_relationship) recipientNew.relationship = args.recipient_relationship;
-        if (args.recipient_age) recipientNew.age = args.recipient_age;
-        if (args.recipient_gender) recipientNew.gender = args.recipient_gender;
-        if (args.recipient_occupation) recipientNew.occupation = args.recipient_occupation;
-        if (args.recipient_interests) recipientNew.interests = args.recipient_interests;
-        if (args.recipient_strengths) recipientNew.strengths = args.recipient_strengths;
-        if (args.occasion) recipientNew.occasion = args.occasion;
-        session.recipientData = mergeData(session.recipientData, recipientNew);
-
-        if (session.userId) {
-          await saveToSupabase(session.userId, session.senderData, session.recipientData);
+        if (session.userId && Object.keys(senderUpdate).length > 0) {
+          const { error } = await supabase.from("profiles").update(senderUpdate).eq("id", session.userId);
+          console.log("[DB] profiles update:", error ? `ERROR: ${error.message}` : "OK", JSON.stringify(senderUpdate));
         }
-        console.log("Extracted profile data:", JSON.stringify(args));
       }
 
-      if (part.functionCall?.name === "save_memories") {
+      if (part.functionCall?.name === "save_recipient_profile") {
+        const args = (part.functionCall.args || {}) as Record<string, unknown>;
+        console.log("[EXTRACT] recipient profile:", JSON.stringify(args));
+
+        if (session.userId && args.nickname) {
+          const { data: existing } = await supabase
+            .from("recipients")
+            .select("id")
+            .eq("user_id", session.userId)
+            .eq("nickname", args.nickname as string)
+            .maybeSingle();
+
+          const row: Record<string, unknown> = { user_id: session.userId, nickname: args.nickname };
+          if (args.relationship) row.relationship = args.relationship;
+          if (args.age) row.age = args.age;
+          if (args.gender) row.gender = args.gender;
+          if (args.occupation) row.occupation = args.occupation;
+          if (args.interests) row.interests = args.interests;
+          if (args.strengths) row.strengths = args.strengths;
+
+          if (existing) {
+            const { error } = await supabase.from("recipients").update(row).eq("id", existing.id);
+            console.log("[DB] recipients update:", error ? `ERROR: ${error.message}` : "OK");
+          } else {
+            const { error } = await supabase.from("recipients").insert(row);
+            console.log("[DB] recipients insert:", error ? `ERROR: ${error.message}` : "OK", JSON.stringify(row));
+          }
+        }
+      }
+
+      if (part.functionCall?.name === "save_sender_memories") {
         const args = (part.functionCall.args || {}) as { memories?: string[] };
+        console.log("[EXTRACT] sender memories:", args.memories);
+
         if (args.memories && args.memories.length > 0 && session.userId) {
           await saveMemories(session.userId, args.memories);
         }
       }
     }
   } catch (err) {
-    console.error("Extraction error:", err);
+    console.error("[EXTRACT] error:", err);
   }
 }
 
