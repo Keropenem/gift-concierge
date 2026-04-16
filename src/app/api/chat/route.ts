@@ -156,6 +156,40 @@ const recipientProfileTool = {
   },
 };
 
+// 受け手に関する自由記述ノート
+const recipientNotesTool = {
+  name: "save_recipient_notes",
+  description: "受け手に関する自由記述の詳細情報を保存する。性格・価値観・エピソード・送り手との関係性のディテールなど、構造化フィールドに収まらない豊かな情報。受け手のnicknameを必ず指定すること。",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      nickname: { type: Type.STRING, description: "受け手の呼び名（save_recipient_profileと同じもの）" },
+      notes: { type: Type.ARRAY, items: { type: Type.STRING }, description: "自由記述の情報。例: ['週末は必ず庭いじりをする', '昔は野球をやっていた', '無口だが料理で愛情を表現する']" },
+    },
+    required: ["nickname", "notes"],
+  },
+};
+
+// 提案した商品の保存
+const proposalTool = {
+  name: "save_proposal",
+  description: "最終的に提案したギフト商品の情報を保存する。Step 6で商品を提案した時に呼び出す。",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      recipient_nickname: { type: Type.STRING, description: "受け手の呼び名" },
+      product_name: { type: Type.STRING, description: "提案した商品名" },
+      product_description: { type: Type.STRING, description: "商品の説明", nullable: true },
+      product_url: { type: Type.STRING, description: "商品のURL", nullable: true },
+      product_price: { type: Type.STRING, description: "価格", nullable: true },
+      maker_name: { type: Type.STRING, description: "製造元・ブランド名", nullable: true },
+      narrative: { type: Type.STRING, description: "提案に添えたストーリー・理由", nullable: true },
+      occasion: { type: Type.STRING, description: "贈り物のきっかけ（誕生日等）", nullable: true },
+    },
+    required: ["recipient_nickname", "product_name"],
+  },
+};
+
 // インメモリセッション管理
 interface SessionData {
   history: Array<{ role: string; parts: Array<{ text: string }> }>;
@@ -228,20 +262,22 @@ async function extractFromConversation(
       {
         role: "user" as const,
         parts: [{
-          text: `ここまでの会話から判明した情報を、以下の3つの関数で正確に分類して保存してください。
+          text: `ここまでの会話から判明した情報を、以下の5つの関数で正確に分類して保存してください。
 
 【重要な分類ルール】
 1. save_sender_profile: 贈り手（ユーザー自身）の年齢・性別・職業・趣味・得意なこと。受け手の情報は絶対に含めない。
 2. save_recipient_profile: 受け手（贈る相手）の情報。nicknameは必須（例: 父、母、田中さん）。送り手との関係性もここ。送り手の情報は絶対に含めない。
 3. save_sender_memories: 贈り手の永続的な性格・価値観・ライフスタイルのみ。
+4. save_recipient_notes: 受け手に関する自由記述の詳細情報。性格・価値観・エピソード・関係性のディテールなど、構造化フィールドに収まらない豊かな情報。nicknameは必須。
+5. save_proposal: 最終的に提案したギフト商品の情報。Step 6で商品を提案した場合のみ呼び出す。
 
 【絶対に保存しないもの】
 - 予算（毎回変わる）
-- 贈り物のきっかけ・イベント名（誕生日、お礼等 — 毎回変わる）
+- 贈り物のきっかけ・イベント名（誕生日、お礼等） — ただしsave_proposalのoccasionフィールドには保存OK
 - 季節や時期に関する情報
-- 今回の相談に固有の条件
+- 今回の相談に固有の条件（save_proposalを除く）
 
-3つとも呼び出してください。該当情報がない関数はスキップしてOK。`
+5つとも呼び出してください。該当情報がない関数はスキップしてOK。`
         }],
       },
     ];
@@ -252,7 +288,7 @@ async function extractFromConversation(
       model: "gemini-2.5-flash",
       contents: extractionPrompt,
       config: {
-        tools: [{ functionDeclarations: [senderProfileTool, recipientProfileTool, memoriesTool] }],
+        tools: [{ functionDeclarations: [senderProfileTool, recipientProfileTool, memoriesTool, recipientNotesTool, proposalTool] }],
       },
     });
 
@@ -313,6 +349,88 @@ async function extractFromConversation(
 
         if (args.memories && args.memories.length > 0 && session.userId) {
           await saveMemories(session.userId, args.memories);
+        }
+      }
+
+      if (part.functionCall?.name === "save_recipient_notes") {
+        const args = (part.functionCall.args || {}) as { nickname?: string; notes?: string[] };
+        console.log("[EXTRACT] recipient notes:", JSON.stringify(args));
+
+        if (session.userId && args.nickname && args.notes && args.notes.length > 0) {
+          // Look up recipient by nickname + user_id
+          const { data: recipient } = await supabase
+            .from("recipients")
+            .select("id")
+            .eq("user_id", session.userId)
+            .eq("nickname", args.nickname)
+            .maybeSingle();
+
+          if (recipient) {
+            // Check for duplicate notes
+            const { data: existingNotes } = await supabase
+              .from("recipient_notes")
+              .select("content")
+              .eq("recipient_id", recipient.id)
+              .eq("user_id", session.userId);
+
+            const existingContents = new Set((existingNotes || []).map((n: { content: string }) => n.content));
+            const newNotes = args.notes
+              .filter(note => !existingContents.has(note))
+              .map(content => ({
+                recipient_id: recipient.id,
+                user_id: session.userId!,
+                content,
+                source: "ai",
+              }));
+
+            if (newNotes.length > 0) {
+              const { error } = await supabase.from("recipient_notes").insert(newNotes);
+              console.log("[DB] recipient_notes insert:", error ? `ERROR: ${error.message}` : "OK", newNotes.map(n => n.content));
+            } else {
+              console.log("[DB] recipient_notes: no new entries to save");
+            }
+          } else {
+            console.log("[EXTRACT] recipient not found for notes:", args.nickname);
+          }
+        }
+      }
+
+      if (part.functionCall?.name === "save_proposal") {
+        const args = (part.functionCall.args || {}) as {
+          recipient_nickname?: string;
+          product_name?: string;
+          product_description?: string;
+          product_url?: string;
+          product_price?: string;
+          maker_name?: string;
+          narrative?: string;
+          occasion?: string;
+        };
+        console.log("[EXTRACT] proposal:", JSON.stringify(args));
+
+        if (session.userId && args.recipient_nickname && args.product_name) {
+          // Look up recipient by nickname + user_id
+          const { data: recipient } = await supabase
+            .from("recipients")
+            .select("id")
+            .eq("user_id", session.userId)
+            .eq("nickname", args.recipient_nickname)
+            .maybeSingle();
+
+          const row: Record<string, unknown> = {
+            user_id: session.userId,
+            recipient_id: recipient?.id || null,
+            product_name: args.product_name,
+          };
+          if (args.product_description) row.product_description = args.product_description;
+          if (args.product_url) row.product_url = args.product_url;
+          if (args.product_price) row.product_price = args.product_price;
+          if (args.maker_name) row.maker_name = args.maker_name;
+          if (args.narrative) row.narrative = args.narrative;
+          if (args.occasion) row.occasion = args.occasion;
+
+          const { error } = await supabase.from("proposals").insert(row);
+          console.log("[DB] proposals insert:", error ? `ERROR: ${error.message}` : "OK", JSON.stringify(row));
         }
       }
     }

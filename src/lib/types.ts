@@ -47,6 +47,30 @@ export interface Memory {
   updated_at: string;
 }
 
+export interface Proposal {
+  id: string;
+  user_id: string;
+  session_id: string | null;
+  recipient_id: string | null;
+  product_name: string;
+  product_description: string | null;
+  product_url: string | null;
+  product_price: string | null;
+  maker_name: string | null;
+  narrative: string | null;
+  occasion: string | null;
+  created_at: string;
+}
+
+export interface RecipientNote {
+  id: string;
+  recipient_id: string;
+  user_id: string;
+  content: string;
+  source: "ai" | "user";
+  created_at: string;
+}
+
 export interface ClickLog {
   id: string;
   user_id: string | null;
