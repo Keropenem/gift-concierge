@@ -18,6 +18,7 @@ export default function ChatPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [initialized, setInitialized] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     loadUserData();
@@ -74,6 +75,7 @@ export default function ChatPage() {
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
     setLoading(true);
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
     setShowRecipientPicker(false);
 
     try {
@@ -123,6 +125,22 @@ export default function ChatPage() {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     sendMessage(input);
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // Ctrl+Enter or Cmd+Enter で送信
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      sendMessage(input);
+    }
+    // 素のEnterは改行（デフォルト動作のまま）
+  }
+
+  function autoResize() {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 200) + "px";
   }
 
   function handleNewChat() {
@@ -286,21 +304,26 @@ export default function ChatPage() {
       <div className="border-t border-border px-4 py-3">
         <form
           onSubmit={handleSubmit}
-          className="max-w-2xl mx-auto flex gap-2"
+          className="max-w-2xl mx-auto flex items-end gap-2"
         >
-          <input
-            type="text"
+          <textarea
+            ref={textareaRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="メッセージを入力..."
+            onChange={(e) => {
+              setInput(e.target.value);
+              autoResize();
+            }}
+            onKeyDown={handleKeyDown}
+            placeholder="メッセージを入力...（Ctrl+Enterで送信）"
             disabled={loading}
-            className="flex-1 px-4 py-2.5 border border-input rounded-full focus:outline-none focus:ring-2 focus:ring-ring/20 disabled:opacity-50"
+            rows={1}
+            className="flex-1 px-4 py-2.5 border border-input rounded-2xl focus:outline-none focus:ring-2 focus:ring-ring/20 disabled:opacity-50 resize-none overflow-hidden leading-relaxed"
             autoFocus
           />
           <button
             type="submit"
             disabled={loading || !input.trim()}
-            className="px-5 py-2.5 bg-primary text-primary-foreground rounded-full hover:opacity-90 transition-opacity disabled:opacity-50"
+            className="px-5 py-2.5 bg-primary text-primary-foreground rounded-2xl hover:opacity-90 transition-opacity disabled:opacity-50 shrink-0"
           >
             送信
           </button>
