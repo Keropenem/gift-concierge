@@ -38,41 +38,54 @@ export default function ChatPage() {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
+    console.log("[DEBUG] user:", user?.id || "NOT LOGGED IN");
+
     if (user) {
       setUserId(user.id);
       userIdRef.current = user.id;
 
-      const { data: profileData } = await supabase
+      const { data: profileData, error: profileError } = await supabase
         .from("profiles")
         .select("*")
         .eq("id", user.id)
         .single();
+
+      console.log("[DEBUG] profileData:", JSON.stringify(profileData));
+      console.log("[DEBUG] profileError:", profileError?.message || "none");
 
       if (profileData) {
         setProfile(profileData);
         profileRef.current = profileData;
       }
 
-      const { data: recipientData } = await supabase
+      const { data: recipientData, error: recipientError } = await supabase
         .from("recipients")
         .select("*")
         .eq("user_id", user.id)
         .order("updated_at", { ascending: false });
+
+      console.log("[DEBUG] recipientData:", JSON.stringify(recipientData));
+      console.log("[DEBUG] recipientError:", recipientError?.message || "none");
 
       if (recipientData && recipientData.length > 0) {
         setRecipients(recipientData);
         setShowRecipientPicker(true);
       }
 
-      const { data: memoryData } = await supabase
+      const { data: memoryData, error: memoryError } = await supabase
         .from("memories")
         .select("*")
         .eq("user_id", user.id);
+
+      console.log("[DEBUG] memoryData:", JSON.stringify(memoryData));
+      console.log("[DEBUG] memoryError:", memoryError?.message || "none");
 
       if (memoryData) {
         setUserMemories(memoryData);
         userMemoriesRef.current = memoryData;
       }
+    } else {
+      console.log("[DEBUG] user is null — not logged in");
     }
 
     setInitialized(true);
@@ -80,6 +93,9 @@ export default function ChatPage() {
     const params = new URLSearchParams(window.location.search);
     const initialQuery = params.get("q");
     if (initialQuery) {
+      console.log("[DEBUG] initialQuery from URL:", initialQuery);
+      console.log("[DEBUG] profileRef at sendMessage time:", JSON.stringify(profileRef.current));
+      console.log("[DEBUG] userIdRef at sendMessage time:", userIdRef.current);
       sendMessage(initialQuery);
     }
   }
@@ -107,10 +123,15 @@ export default function ChatPage() {
         const p = profile || profileRef.current;
         const uid = userId || userIdRef.current;
         const mem = userMemories.length > 0 ? userMemories : userMemoriesRef.current;
+        console.log("[DEBUG sendMessage] profile:", JSON.stringify(p));
+        console.log("[DEBUG sendMessage] userId:", uid);
+        console.log("[DEBUG sendMessage] memories:", mem.length);
+        console.log("[DEBUG sendMessage] selectedRecipient:", JSON.stringify(selectedRecipient));
         if (p) body.profile = p;
         if (selectedRecipient) body.recipient = selectedRecipient;
         if (uid) body.userId = uid;
         if (mem.length > 0) body.memories = mem;
+        console.log("[DEBUG sendMessage] body keys being sent:", Object.keys(body));
       }
 
       const res = await fetch("/api/chat", {
@@ -204,6 +225,16 @@ export default function ChatPage() {
           </button>
         </div>
       </header>
+
+      {/* デバッグバナー（一時的） */}
+      <div className="bg-yellow-100 text-yellow-800 text-xs px-4 py-2 border-b border-yellow-300">
+        <strong>DEBUG:</strong>{" "}
+        userId={userId || userIdRef.current || "null"} |{" "}
+        profile={profile?.occupation || profileRef.current?.occupation || "null"} |{" "}
+        age={profile?.age || profileRef.current?.age || "null"} |{" "}
+        memories={userMemories.length || userMemoriesRef.current.length} |{" "}
+        recipients={recipients.length}
+      </div>
 
       {/* チャットメッセージエリア */}
       <div className="flex-1 overflow-y-auto px-4 py-6">
