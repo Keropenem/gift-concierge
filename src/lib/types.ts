@@ -15,11 +15,27 @@ export interface Profile {
 export interface Session {
   id: string;
   user_id: string | null;
+  recipient_id: string | null;
   messages: ChatMessage[];
   profile_input: ProfileInput;
   target_input: TargetInput;
   analysis_result: AnalysisResult;
   created_at: string;
+}
+
+export interface Recipient {
+  id: string;
+  user_id: string;
+  nickname: string;
+  relationship: string | null;
+  age: number | null;
+  gender: string | null;
+  occupation: string | null;
+  interests: string[];
+  strengths: string[];
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ClickLog {
