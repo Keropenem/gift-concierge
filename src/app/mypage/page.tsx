@@ -33,7 +33,7 @@ export default function MyPage() {
   const [recipientProposals, setRecipientProposals] = useState<Proposal[]>([]);
 
   // Profile form state
-  const [profileForm, setProfileForm] = useState({ name: "", age: "", gender: "", occupation: "", interests: "", strengths: "" });
+  const [profileForm, setProfileForm] = useState({ name: "", age: "", gender: "", occupation: "", interests: "" });
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileMsg, setProfileMsg] = useState("");
 
@@ -41,7 +41,7 @@ export default function MyPage() {
   const [newMemory, setNewMemory] = useState("");
 
   // Recipient detail form
-  const [recipientForm, setRecipientForm] = useState({ nickname: "", relationship: "", age: "", gender: "", occupation: "", interests: "", strengths: "" });
+  const [recipientForm, setRecipientForm] = useState({ nickname: "", relationship: "", age: "", gender: "", occupation: "", interests: "" });
   const [recipientSaving, setRecipientSaving] = useState(false);
 
   // --- データ取得 ---
@@ -64,7 +64,6 @@ export default function MyPage() {
         gender: pRes.data.gender ?? "",
         occupation: pRes.data.occupation ?? "",
         interests: pRes.data.interests?.join(", ") ?? "",
-        strengths: pRes.data.strengths?.join(", ") ?? "",
       });
     }
     setRecipients(rRes.data ?? []);
@@ -87,7 +86,6 @@ export default function MyPage() {
     updates.gender = profileForm.gender || null;
     updates.occupation = profileForm.occupation || null;
     updates.interests = profileForm.interests ? profileForm.interests.split(",").map(s => s.trim()).filter(Boolean) : [];
-    updates.strengths = profileForm.strengths ? profileForm.strengths.split(",").map(s => s.trim()).filter(Boolean) : [];
 
     const { error } = await supabase.from("profiles").update(updates).eq("id", userId);
     setProfileSaving(false);
@@ -128,7 +126,6 @@ export default function MyPage() {
         gender: r.gender ?? "",
         occupation: r.occupation ?? "",
         interests: r.interests?.join(", ") ?? "",
-        strengths: r.strengths?.join(", ") ?? "",
       });
     }
     // ノートと提案履歴を取得
@@ -151,7 +148,6 @@ export default function MyPage() {
       gender: recipientForm.gender || null,
       occupation: recipientForm.occupation || null,
       interests: recipientForm.interests ? recipientForm.interests.split(",").map(s => s.trim()).filter(Boolean) : [],
-      strengths: recipientForm.strengths ? recipientForm.strengths.split(",").map(s => s.trim()).filter(Boolean) : [],
     };
     const { error } = await supabase.from("recipients").update(updates).eq("id", recipientDetailId);
     setRecipientSaving(false);
@@ -238,11 +234,6 @@ export default function MyPage() {
             <div>
               <label htmlFor="interests" className="block text-xs font-medium mb-1 text-muted-foreground">関心事</label>
               <input id="interests" type="text" value={profileForm.interests} onChange={e => setProfileForm(p => ({ ...p, interests: e.target.value }))} className="w-full px-3 py-2 text-sm border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring/20" placeholder="カンマ区切りで入力" />
-            </div>
-
-            <div>
-              <label htmlFor="strengths" className="block text-xs font-medium mb-1 text-muted-foreground">得意なこと</label>
-              <input id="strengths" type="text" value={profileForm.strengths} onChange={e => setProfileForm(p => ({ ...p, strengths: e.target.value }))} className="w-full px-3 py-2 text-sm border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring/20" placeholder="カンマ区切りで入力" />
             </div>
 
             <button type="submit" disabled={profileSaving} className="w-full py-2 text-sm bg-primary text-primary-foreground rounded-md hover:opacity-90 transition-opacity disabled:opacity-50">

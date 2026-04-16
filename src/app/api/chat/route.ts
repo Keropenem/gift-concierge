@@ -132,7 +132,6 @@ const senderProfileTool = {
       gender: { type: Type.STRING, description: "贈り手の性別（male/female/other）", nullable: true },
       occupation: { type: Type.STRING, description: "贈り手の職業", nullable: true },
       interests: { type: Type.ARRAY, items: { type: Type.STRING }, description: "贈り手の趣味・関心事", nullable: true },
-      strengths: { type: Type.ARRAY, items: { type: Type.STRING }, description: "贈り手の得意なこと", nullable: true },
     },
     required: [],
   },
@@ -151,7 +150,6 @@ const recipientProfileTool = {
       gender: { type: Type.STRING, description: "受け手の性別（male/female/other）", nullable: true },
       occupation: { type: Type.STRING, description: "受け手の職業", nullable: true },
       interests: { type: Type.ARRAY, items: { type: Type.STRING }, description: "受け手の趣味・関心事", nullable: true },
-      strengths: { type: Type.ARRAY, items: { type: Type.STRING }, description: "受け手の得意なこと", nullable: true },
     },
     required: ["nickname"],
   },
@@ -326,7 +324,6 @@ async function extractFromConversation(
         if (args.gender) senderUpdate.gender = args.gender;
         if (args.occupation) senderUpdate.occupation = args.occupation;
         if (args.interests) senderUpdate.interests = args.interests;
-        if (args.strengths) senderUpdate.strengths = args.strengths;
 
         if (session.userId && Object.keys(senderUpdate).length > 0) {
           const { error } = await supabase.from("profiles").update(senderUpdate).eq("id", session.userId);
@@ -352,7 +349,6 @@ async function extractFromConversation(
           if (args.gender) row.gender = args.gender;
           if (args.occupation) row.occupation = args.occupation;
           if (args.interests) row.interests = args.interests;
-          if (args.strengths) row.strengths = args.strengths;
 
           if (existing) {
             const { error } = await supabase.from("recipients").update(row).eq("id", existing.id);

@@ -23,7 +23,6 @@ export default function SignupPage() {
     const occupation = formData.get("occupation") as string;
     const name = formData.get("name") as string;
     const interestsRaw = formData.get("interests") as string;
-    const strengthsRaw = formData.get("strengths") as string;
 
     const supabase = createClient();
 
@@ -44,13 +43,10 @@ export default function SignupPage() {
       const interests = interestsRaw
         ? interestsRaw.split(",").map((s) => s.trim()).filter(Boolean)
         : [];
-      const strengths = strengthsRaw
-        ? strengthsRaw.split(",").map((s) => s.trim()).filter(Boolean)
-        : [];
 
       await supabase
         .from("profiles")
-        .update({ name, age, gender, occupation, interests, strengths })
+        .update({ name, age, gender, occupation, interests })
         .eq("id", data.user.id);
     }
 
@@ -182,20 +178,6 @@ export default function SignupPage() {
               required
               className="w-full px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring/20"
               placeholder="カンマ区切りで入力（例: 料理, 旅行, 写真）"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="strengths" className="block text-sm font-medium mb-1">
-              得意なこと <span className="text-red-500">*</span>
-            </label>
-            <input
-              id="strengths"
-              name="strengths"
-              type="text"
-              required
-              className="w-full px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring/20"
-              placeholder="カンマ区切りで入力（例: プログラミング, 絵を描く）"
             />
           </div>
 
