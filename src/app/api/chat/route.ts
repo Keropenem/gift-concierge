@@ -491,14 +491,50 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (recipient) {
-      contextParts.push(
-        `【受取り手情報】以下の相手への贈り物です:\n` +
-        `呼び名: ${recipient.nickname}, 関係性: ${recipient.relationship || "不明"}\n` +
-        `年齢: ${recipient.age || "不明"}, 性別: ${recipient.gender || "不明"}, 職業: ${recipient.occupation || "不明"}\n` +
-        `関心事: ${(recipient.interests || []).join(", ") || "不明"}, 得意なこと: ${(recipient.strengths || []).join(", ") || "不明"}\n` +
-        `Step 2もスキップし、Step 3から開始してください。`
-      );
+    // 受け手: 明示的に選択 or メッセージからの自動マッチ
+    let matchedRecipient = recipient;
+    if (!matchedRecipient && userId) {
+      const { data: savedRecipients } = await supabase
+        .from("recipients")
+        .select("*")
+        .eq("user_id", userId);
+
+      if (savedRecipients && savedRecipients.length > 0) {
+        for (const r of savedRecipients) {
+          const keywords = [r.nickname, r.relationship].filter(Boolean);
+          if (keywords.some((kw: string) => message.includes(kw))) {
+            matchedRecipient = r;
+            console.log("[CHAT] auto-matched recipient:", r.nickname);
+
+            // 受け手ノートも取得
+            const { data: notes } = await supabase
+              .from("recipient_notes")
+              .select("content")
+              .eq("recipient_id", r.id);
+
+            if (notes && notes.length > 0) {
+              matchedRecipient._notes = notes.map((n: { content: string }) => n.content);
+            }
+            break;
+          }
+        }
+      }
+    }
+
+    if (matchedRecipient) {
+      let recipientContext =
+        `【受取り手情報】以下の相手への贈り物です（過去の情報から自動取得）:\n` +
+        `呼び名: ${matchedRecipient.nickname}, 関係性: ${matchedRecipient.relationship || "不明"}\n` +
+        `年齢: ${matchedRecipient.age || "不明"}, 性別: ${matchedRecipient.gender || "不明"}, 職業: ${matchedRecipient.occupation || "不明"}\n` +
+        `関心事: ${(matchedRecipient.interests || []).join(", ") || "不明"}, 得意なこと: ${(matchedRecipient.strengths || []).join(", ") || "不明"}`;
+
+      if (matchedRecipient._notes && matchedRecipient._notes.length > 0) {
+        recipientContext += `\n【この相手について過去に記録された情報】\n` +
+          matchedRecipient._notes.map((n: string) => `- ${n}`).join("\n");
+      }
+
+      recipientContext += `\nStep 2もスキップし、Step 3から開始してください。`;
+      contextParts.push(recipientContext);
     }
 
     const firstMessage = contextParts.length > 0
