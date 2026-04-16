@@ -21,6 +21,11 @@ export default function ChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // stateの更新タイミングに依存しないよう、refでも保持
+  const profileRef = useRef<Profile | null>(null);
+  const userIdRef = useRef<string | null>(null);
+  const userMemoriesRef = useRef<Memory[]>([]);
+
   useEffect(() => {
     loadUserData();
   }, []);
@@ -35,13 +40,18 @@ export default function ChatPage() {
 
     if (user) {
       setUserId(user.id);
+      userIdRef.current = user.id;
+
       const { data: profileData } = await supabase
         .from("profiles")
         .select("*")
         .eq("id", user.id)
         .single();
 
-      if (profileData) setProfile(profileData);
+      if (profileData) {
+        setProfile(profileData);
+        profileRef.current = profileData;
+      }
 
       const { data: recipientData } = await supabase
         .from("recipients")
@@ -59,7 +69,10 @@ export default function ChatPage() {
         .select("*")
         .eq("user_id", user.id);
 
-      if (memoryData) setUserMemories(memoryData);
+      if (memoryData) {
+        setUserMemories(memoryData);
+        userMemoriesRef.current = memoryData;
+      }
     }
 
     setInitialized(true);
@@ -89,12 +102,15 @@ export default function ChatPage() {
     try {
       const body: Record<string, unknown> = { message: text };
 
-      // 初回メッセージ時にプロフィール・メモリ情報を添付
+      // 初回メッセージ時にプロフィール・メモリ情報を添付（refを使ってstate更新タイミングに依存しない）
       if (messages.length === 0) {
-        if (profile) body.profile = profile;
+        const p = profile || profileRef.current;
+        const uid = userId || userIdRef.current;
+        const mem = userMemories.length > 0 ? userMemories : userMemoriesRef.current;
+        if (p) body.profile = p;
         if (selectedRecipient) body.recipient = selectedRecipient;
-        if (userId) body.userId = userId;
-        if (userMemories.length > 0) body.memories = userMemories;
+        if (uid) body.userId = uid;
+        if (mem.length > 0) body.memories = mem;
       }
 
       const res = await fetch("/api/chat", {
