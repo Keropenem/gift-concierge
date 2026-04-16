@@ -557,7 +557,7 @@ export async function POST(request: NextRequest) {
       id: sessionId,
       history: [{ role: "user", parts: [{ text: firstMessage }] }],
       userId: userId || null,
-      senderData: profile || {},
+      senderData: { ...(profile || {}), _preview: message },
       recipientData: recipient || {},
     };
   } else {

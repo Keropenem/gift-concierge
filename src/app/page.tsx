@@ -12,15 +12,14 @@ export default async function Home() {
   if (user) {
     const { data } = await supabase
       .from("sessions")
-      .select("id, created_at, messages")
+      .select("id, created_at, messages, profile_input")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(10);
 
     if (data) {
-      sessions = data.map((s: { id: string; created_at: string; messages: Array<{ role: string; parts: Array<{ text: string }> }> }) => {
-        const firstUserMsg = s.messages?.find((m: { role: string }) => m.role === "user");
-        const preview = firstUserMsg?.parts?.[0]?.text?.substring(0, 60) || "新しい相談";
+      sessions = data.map((s: { id: string; created_at: string; messages: Array<{ role: string; parts: Array<{ text: string }> }>; profile_input: Record<string, unknown> }) => {
+        const preview = (s.profile_input?._preview as string)?.substring(0, 60) || "新しい相談";
         return {
           id: s.id,
           created_at: s.created_at,
