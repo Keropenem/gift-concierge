@@ -106,14 +106,14 @@ function buildSystemPrompt(clientPrompt: string): string {
 // 送り手の永続的な特徴をメモリに保存
 const memoriesTool = {
   name: "save_sender_memories",
-  description: "贈り手（ユーザー自身）の永続的な性格・価値観・ライフスタイル・好みを記録する。次回以降の別の相手への提案にも活かせる普遍的な情報のみ。今回限りの条件（予算・きっかけ・季節等）は絶対に含めない。受け手の情報も含めない。",
+  description: "贈り手（ユーザー自身）のギフト選びに影響する情報を記録する。(1)美的感覚・デザインの好み (2)贈り物に対する考え方・こだわり (3)生活環境・ライフスタイル (4)人間関係の大切にしていること。基本属性（年齢・職業等）はsave_sender_profileで保存するのでここには含めない。予算・きっかけ・受け手の情報も含めない。",
   parameters: {
     type: Type.OBJECT,
     properties: {
       memories: {
         type: Type.ARRAY,
         items: { type: Type.STRING },
-        description: "贈り手自身の永続的な特徴のみ。例: [\"ミニマルなデザインを好む\", \"犬を2匹飼っている\", \"体験型のギフトを選ぶ傾向がある\"]。予算・きっかけ・受け手の情報は含めない。",
+        description: "ギフト選びに活かせる情報のみ。例: [\"体験型のギフトを好む\", \"手作り・職人のものに価値を感じる\", \"サプライズ演出が好き\"]",
       },
     },
     required: ["memories"],
@@ -159,12 +159,12 @@ const recipientProfileTool = {
 // 受け手に関する自由記述ノート
 const recipientNotesTool = {
   name: "save_recipient_notes",
-  description: "受け手に関する自由記述の詳細情報を保存する。性格・価値観・エピソード・送り手との関係性のディテールなど、構造化フィールドに収まらない豊かな情報。受け手のnicknameを必ず指定すること。",
+  description: "受け手に関する情報を保存する。次回以降のギフト提案で再度聞かなくて済むよう、以下を重点的に記録すること。(1)送り手との関係性の具体的エピソード・思い出 (2)二人の共通の趣味・価値観・内輪ネタ (3)受け手の性格・人柄・口癖・こだわり (4)受け手の好み・嫌い・ライフスタイル (5)過去に喜ばれた/失敗した贈り物の経験。年齢・職業などの基本属性はsave_recipient_profileで保存するのでここには含めない。",
   parameters: {
     type: Type.OBJECT,
     properties: {
       nickname: { type: Type.STRING, description: "受け手の呼び名（save_recipient_profileと同じもの）" },
-      notes: { type: Type.ARRAY, items: { type: Type.STRING }, description: "自由記述の情報。例: ['週末は必ず庭いじりをする', '昔は野球をやっていた', '無口だが料理で愛情を表現する']" },
+      notes: { type: Type.ARRAY, items: { type: Type.STRING }, description: "具体的な情報。例: ['子供の頃に一緒に釣りに行った思い出がある', '無口だが料理で愛情を表現する', 'お酒は飲まないがコーヒーにはこだわる', '去年ネクタイを贈ったら喜んでくれた']" },
     },
     required: ["nickname", "notes"],
   },
@@ -529,11 +529,17 @@ export async function POST(request: NextRequest) {
         `関心事: ${(matchedRecipient.interests || []).join(", ") || "不明"}, 得意なこと: ${(matchedRecipient.strengths || []).join(", ") || "不明"}`;
 
       if (matchedRecipient._notes && matchedRecipient._notes.length > 0) {
-        recipientContext += `\n【この相手について過去に記録された情報】\n` +
+        recipientContext += `\n【この相手について過去に記録された情報（関係性・エピソード・性格等）】\n` +
           matchedRecipient._notes.map((n: string) => `- ${n}`).join("\n");
-      }
 
-      recipientContext += `\nStep 2もスキップし、Step 3から開始してください。`;
+        if (matchedRecipient._notes.length >= 3) {
+          recipientContext += `\nStep 2とStep 3の両方をスキップし、Step 4から自動実行してください。上記の情報を基に「見えない共通点」の分析から始めてください。`;
+        } else {
+          recipientContext += `\nStep 2はスキップし、Step 3から開始してください。ただし、上記の記録済み情報と重複する質問はしないでください。`;
+        }
+      } else {
+        recipientContext += `\nStep 2もスキップし、Step 3から開始してください。`;
+      }
       contextParts.push(recipientContext);
     }
 
