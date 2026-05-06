@@ -393,7 +393,21 @@ export default function ChatPage() {
                 {msg.role === "user" ? (
                   msg.content
                 ) : (
-                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                  <ReactMarkdown
+                    components={{
+                      a: ({ href, children, ...props }) => (
+                        <a
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sky-600 underline underline-offset-2 hover:text-sky-700"
+                          {...props}
+                        >
+                          {children}
+                        </a>
+                      ),
+                    }}
+                  >{msg.content}</ReactMarkdown>
                 )}
               </div>
             </div>
