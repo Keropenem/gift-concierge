@@ -131,6 +131,76 @@ export function shouldMerge(decision: MatchDecision): boolean {
   return decision.matchId !== null && decision.confidence >= HIGH_CONFIDENCE_THRESHOLD;
 }
 
+// セッション開始時、ユーザーの第一発言から既存recipientを推測する。
+// 「おふくろ」と書かれたメッセージで既存「母親」を引き当てるなど、
+// substring一致ではカバーできない呼び方の揺れを救う用途。
+export async function matchRecipientFromMessage(
+  message: string,
+  existing: ExistingRecipientForMatch[]
+): Promise<MatchDecision> {
+  if (existing.length === 0) {
+    return { matchId: null, confidence: 0, reasoning: "既存の受け手がいない" };
+  }
+
+  const existingList = existing
+    .map((r, i) => `${i + 1}. id=${r.id} | ${formatRecipient(r)}`)
+    .join("\n");
+
+  const prompt = `日本語のギフト相談アプリで、ユーザーが新しいセッションの最初に送ってきたメッセージから「誰への贈り物の話か」を推測します。
+
+【ユーザーの第一発言】
+${message}
+
+【このユーザーが過去に登録した受け手リスト】
+${existingList}
+
+【判定ルール】
+- 発言内に登場する呼び方（例: 「母親」「おふくろ」「ママ」「お袋」「義母」「妻」「相方」「嫁」「彼女」など）が、既存リストの誰かを指していると判断できれば match_id を返す
+- 呼び方が違っても意味的に同一人物を指していれば同一とみなす（例: 既存「母親」⇔ 発言「おふくろ」）
+- 関係性が同じでも別人の可能性が高い場合（例: 既存「父」、発言「義父」）は match_id を null
+- 発言内に特定の人物への言及が無い場合（例: 「贈り物について相談したい」のみ）も match_id を null
+- 確信度が0.85以上の場合のみ match_id を返し、それ未満は null にする
+
+decide_recipient_match関数で判定結果を返してください。`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      config: {
+        temperature: 0.1,
+        tools: [{ functionDeclarations: [matchTool] }],
+      },
+    });
+
+    const parts = response.candidates?.[0]?.content?.parts || [];
+    const fnCall = parts.find((p) => p.functionCall?.name === "decide_recipient_match");
+    if (!fnCall?.functionCall?.args) {
+      return { matchId: null, confidence: 0, reasoning: "LLM応答に関数呼び出しなし" };
+    }
+
+    const args = fnCall.functionCall.args as {
+      match_id?: string | null;
+      confidence?: number;
+      reasoning?: string;
+    };
+
+    const matchId = args.match_id && existing.some((r) => r.id === args.match_id)
+      ? args.match_id
+      : null;
+    const confidence = typeof args.confidence === "number" ? args.confidence : 0;
+
+    return {
+      matchId,
+      confidence,
+      reasoning: args.reasoning || "",
+    };
+  } catch (err) {
+    console.error("[MATCHER] message-match error:", err);
+    return { matchId: null, confidence: 0, reasoning: "判定エラー" };
+  }
+}
+
 function formatRecipient(r: RecipientCandidate | ExistingRecipientForMatch): string {
   const parts: string[] = [`呼び名=${r.nickname}`];
   if (r.relationship) parts.push(`関係性=${r.relationship}`);

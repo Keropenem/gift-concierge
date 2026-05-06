@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI, Type } from "@google/genai";
 import { createClient } from "@supabase/supabase-js";
-import { findMatchingRecipient, shouldMerge } from "@/lib/recipientMatcher";
+import { findMatchingRecipient, matchRecipientFromMessage, shouldMerge } from "@/lib/recipientMatcher";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
@@ -537,26 +537,50 @@ export async function POST(request: NextRequest) {
         .eq("user_id", userId)
         .is("canonical_recipient_id", null);
 
+      // 統合済みメンバー含めて notes/proposals を集約してロード
+      const loadRecipientContext = async (r: Record<string, unknown>) => {
+        const { data: members } = await supabase
+          .from("recipients")
+          .select("id")
+          .eq("canonical_recipient_id", r.id as string);
+        const recipientIds = [r.id as string, ...(members ?? []).map((m) => m.id as string)];
+
+        const [notesRes, proposalsRes] = await Promise.all([
+          supabase.from("recipient_notes").select("content").in("recipient_id", recipientIds),
+          supabase.from("proposals").select("product_name, occasion, created_at").in("recipient_id", recipientIds).order("created_at", { ascending: false }).limit(10),
+        ]);
+
+        if (notesRes.data && notesRes.data.length > 0) {
+          r._notes = notesRes.data.map((n: { content: string }) => n.content);
+        }
+        if (proposalsRes.data && proposalsRes.data.length > 0) {
+          r._pastProposals = proposalsRes.data;
+        }
+        return r;
+      };
+
       if (savedRecipients && savedRecipients.length > 0) {
+        // 1) substring一致（高速・LLMコール無し）
         for (const r of savedRecipients) {
           const keywords = [r.nickname, r.relationship].filter(Boolean);
           if (keywords.some((kw: string) => message.includes(kw))) {
-            matchedRecipient = r;
-            console.log("[CHAT] auto-matched recipient:", r.nickname);
-
-            // 受け手ノートと過去の提案履歴を取得
-            const [notesRes, proposalsRes] = await Promise.all([
-              supabase.from("recipient_notes").select("content").eq("recipient_id", r.id),
-              supabase.from("proposals").select("product_name, occasion, created_at").eq("recipient_id", r.id).order("created_at", { ascending: false }).limit(10),
-            ]);
-
-            if (notesRes.data && notesRes.data.length > 0) {
-              matchedRecipient._notes = notesRes.data.map((n: { content: string }) => n.content);
-            }
-            if (proposalsRes.data && proposalsRes.data.length > 0) {
-              matchedRecipient._pastProposals = proposalsRes.data;
-            }
+            matchedRecipient = await loadRecipientContext(r);
+            console.log("[CHAT] auto-matched recipient (substring):", r.nickname);
             break;
+          }
+        }
+
+        // 2) substring未ヒット時のLLMフォールバック
+        // 「母親」を「おふくろ」と呼んだ等、表記揺れを救う
+        if (!matchedRecipient) {
+          const decision = await matchRecipientFromMessage(message, savedRecipients);
+          console.log("[CHAT] message-match decision:", JSON.stringify(decision));
+          if (shouldMerge(decision) && decision.matchId) {
+            const matched = savedRecipients.find((r) => r.id === decision.matchId);
+            if (matched) {
+              matchedRecipient = await loadRecipientContext(matched);
+              console.log("[CHAT] auto-matched recipient (llm):", matched.nickname);
+            }
           }
         }
       }
