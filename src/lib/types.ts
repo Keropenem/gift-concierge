@@ -35,6 +35,7 @@ export interface Recipient {
   interests: string[];
   strengths: string[];
   notes: string | null;
+  canonical_recipient_id: string | null;
   created_at: string;
   updated_at: string;
 }

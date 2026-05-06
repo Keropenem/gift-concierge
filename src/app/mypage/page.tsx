@@ -44,6 +44,22 @@ export default function MyPage() {
   const [recipientForm, setRecipientForm] = useState({ nickname: "", relationship: "", age: "", gender: "", occupation: "", interests: "" });
   const [recipientSaving, setRecipientSaving] = useState(false);
 
+  // Dedup states
+  type DedupCluster = {
+    canonical_id: string;
+    member_ids: string[];
+    canonical: Pick<Recipient, "id" | "nickname" | "relationship" | "age" | "gender" | "occupation"> | null;
+    members: Array<Pick<Recipient, "id" | "nickname" | "relationship" | "age" | "gender" | "occupation">>;
+    confidence: number;
+    reasoning: string;
+  };
+  const [dedupModalOpen, setDedupModalOpen] = useState(false);
+  const [dedupLoading, setDedupLoading] = useState(false);
+  const [dedupClusters, setDedupClusters] = useState<DedupCluster[]>([]);
+  const [dedupSelected, setDedupSelected] = useState<Set<string>>(new Set());
+  const [dedupApplying, setDedupApplying] = useState(false);
+  const [dedupMessage, setDedupMessage] = useState("");
+
   // --- データ取得 ---
   const fetchAll = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -52,7 +68,7 @@ export default function MyPage() {
 
     const [pRes, rRes, mRes] = await Promise.all([
       supabase.from("profiles").select("*").eq("id", user.id).single<Profile>(),
-      supabase.from("recipients").select("*").eq("user_id", user.id).order("updated_at", { ascending: false }).returns<Recipient[]>(),
+      supabase.from("recipients").select("*").eq("user_id", user.id).is("canonical_recipient_id", null).order("updated_at", { ascending: false }).returns<Recipient[]>(),
       supabase.from("memories").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).returns<Memory[]>(),
     ]);
 
@@ -128,10 +144,16 @@ export default function MyPage() {
         interests: r.interests?.join(", ") ?? "",
       });
     }
-    // ノートと提案履歴を取得
+    // 統合済みのメンバー（同一人物として統合された別ID）も含めてノート・提案履歴を集約
+    const { data: members } = await supabase
+      .from("recipients")
+      .select("id")
+      .eq("canonical_recipient_id", recipientId);
+    const recipientIds = [recipientId, ...(members ?? []).map((m) => m.id as string)];
+
     const [notesRes, proposalsRes] = await Promise.all([
-      supabase.from("recipient_notes").select("*").eq("recipient_id", recipientId).order("created_at", { ascending: false }).returns<RecipientNote[]>(),
-      supabase.from("proposals").select("*").eq("recipient_id", recipientId).order("created_at", { ascending: false }).returns<Proposal[]>(),
+      supabase.from("recipient_notes").select("*").in("recipient_id", recipientIds).order("created_at", { ascending: false }).returns<RecipientNote[]>(),
+      supabase.from("proposals").select("*").in("recipient_id", recipientIds).order("created_at", { ascending: false }).returns<Proposal[]>(),
     ]);
     setRecipientNotes(notesRes.data ?? []);
     setRecipientProposals(proposalsRes.data ?? []);
@@ -162,6 +184,63 @@ export default function MyPage() {
     if (!error) {
       setRecipients(prev => prev.filter(r => r.id !== id));
       setRecipientDetailId(null);
+    }
+  };
+
+  // --- 重複候補のチェック・統合 ---
+  const handleDedupCheck = async () => {
+    setDedupLoading(true);
+    setDedupMessage("");
+    try {
+      const res = await fetch("/api/recipients/dedup-suggest", { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) {
+        setDedupMessage(json.error ?? "取得に失敗しました");
+        setDedupClusters([]);
+      } else {
+        setDedupClusters(json.clusters ?? []);
+        setDedupSelected(new Set((json.clusters ?? []).map((c: DedupCluster) => c.canonical_id)));
+        if ((json.clusters ?? []).length === 0) setDedupMessage("重複候補は見つかりませんでした");
+      }
+    } catch (err) {
+      setDedupMessage("通信エラーが発生しました");
+      console.error(err);
+    } finally {
+      setDedupLoading(false);
+    }
+  };
+
+  const toggleDedupSelected = (canonicalId: string) => {
+    setDedupSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(canonicalId)) next.delete(canonicalId);
+      else next.add(canonicalId);
+      return next;
+    });
+  };
+
+  const handleDedupApply = async () => {
+    const selected = dedupClusters.filter(c => dedupSelected.has(c.canonical_id));
+    if (selected.length === 0) return;
+    setDedupApplying(true);
+    setDedupMessage("");
+    try {
+      let mergedCount = 0;
+      for (const c of selected) {
+        const res = await fetch("/api/recipients/merge", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ canonical_id: c.canonical_id, member_ids: c.member_ids }),
+        });
+        const json = await res.json();
+        if (res.ok) mergedCount += json.merged ?? 0;
+      }
+      setDedupMessage(`${mergedCount}件を統合しました`);
+      setDedupClusters([]);
+      setDedupSelected(new Set());
+      await fetchAll();
+    } finally {
+      setDedupApplying(false);
     }
   };
 
@@ -280,7 +359,17 @@ export default function MyPage() {
 
       {/* 受け手一覧モーダル */}
       <Modal open={recipientModalOpen} onClose={() => { setRecipientModalOpen(false); setRecipientDetailId(null); setRecipientNotesModalOpen(false); setRecipientProposalsModalOpen(false); }} title={`贈った相手 (${recipients.length}人)`}>
-        <p className="text-xs text-muted-foreground mb-4">チャットで教えた相手の情報が自動保存されます。クリックで詳細を表示。</p>
+        <p className="text-xs text-muted-foreground mb-2">チャットで教えた相手の情報が自動保存されます。クリックで詳細を表示。</p>
+        {recipients.length >= 2 && (
+          <div className="mb-4">
+            <button
+              onClick={() => { setDedupModalOpen(true); handleDedupCheck(); }}
+              className="text-xs px-3 py-1.5 border border-border rounded-md hover:bg-muted transition-colors"
+            >
+              重複候補をチェック
+            </button>
+          </div>
+        )}
 
         {recipients.length === 0 ? (
           <div className="text-center py-8 text-sm text-muted-foreground border border-dashed border-border rounded-lg">
@@ -445,10 +534,68 @@ export default function MyPage() {
                   <span>{new Date(p.created_at).toLocaleDateString("ja-JP")}</span>
                 </div>
                 {p.product_url && (
-                  <a href={p.product_url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline mt-1 inline-block">商品リンク</a>
+                  <a href={p.product_url} target="_blank" rel="noopener noreferrer" className="text-xs text-sky-600 underline underline-offset-2 hover:text-sky-700 mt-1 inline-block">商品リンク</a>
                 )}
               </div>
             ))}
+          </div>
+        )}
+      </Modal>
+
+      {/* 重複候補モーダル */}
+      <Modal
+        open={dedupModalOpen}
+        onClose={() => { setDedupModalOpen(false); setDedupClusters([]); setDedupSelected(new Set()); setDedupMessage(""); }}
+        title="重複候補のチェック"
+      >
+        <p className="text-xs text-muted-foreground mb-4">
+          AIが同一人物の可能性が高い相手をクラスタとして提案します。チェックしたクラスタを統合できます。統合後も元データは保持され、表示上だけ1人にまとまります。
+        </p>
+
+        {dedupLoading && (
+          <p className="text-sm text-muted-foreground text-center py-8">AIが解析中…</p>
+        )}
+
+        {!dedupLoading && dedupMessage && (
+          <p className="text-sm text-muted-foreground text-center py-4">{dedupMessage}</p>
+        )}
+
+        {!dedupLoading && dedupClusters.length > 0 && (
+          <div className="space-y-3">
+            {dedupClusters.map(c => (
+              <label key={c.canonical_id} className="block p-4 border border-border rounded-lg cursor-pointer hover:bg-muted/30 transition-colors">
+                <div className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={dedupSelected.has(c.canonical_id)}
+                    onChange={() => toggleDedupSelected(c.canonical_id)}
+                    className="mt-1"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium mb-1">
+                      代表: {c.canonical?.nickname ?? "(不明)"}
+                      {c.canonical?.relationship && (
+                        <span className="text-xs text-muted-foreground ml-2">{c.canonical.relationship}</span>
+                      )}
+                    </div>
+                    <div className="text-xs text-muted-foreground mb-2">
+                      統合される: {c.members.map(m => m.nickname).join("、")}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground italic">
+                      {c.reasoning}（確信度 {(c.confidence * 100).toFixed(0)}%）
+                    </div>
+                  </div>
+                </div>
+              </label>
+            ))}
+
+            <button
+              onClick={handleDedupApply}
+              disabled={dedupApplying || dedupSelected.size === 0}
+              className="w-full py-2 text-sm bg-primary text-primary-foreground rounded-md hover:opacity-90 transition-opacity disabled:opacity-50"
+            >
+              {dedupApplying ? "統合中…" : `選択した ${dedupSelected.size} クラスタを統合`}
+            </button>
           </div>
         )}
       </Modal>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI, Type } from "@google/genai";
 import { createClient } from "@supabase/supabase-js";
+import { findMatchingRecipient, shouldMerge } from "@/lib/recipientMatcher";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
@@ -314,6 +315,32 @@ async function extractFromConversation(
     const parts = response.candidates?.[0]?.content?.parts || [];
     console.log("[EXTRACT_FN] response parts:", parts.length, "functionCalls:", parts.filter(p => p.functionCall).map(p => p.functionCall?.name));
 
+    // 同一抽出パス内で nickname → 解決済み recipient_id を共有する
+    // （save_recipient_profile 後の save_recipient_notes / save_proposal で再利用）
+    const nicknameToRecipientId = new Map<string, string>();
+
+    // 受け手をニックネームから解決（正本＝canonical_recipient_id=null のみが対象）
+    // 1) 抽出パス内キャッシュ → 2) 完全一致（カノニカル化を辿る）
+    const resolveRecipientByNickname = async (
+      nickname: string,
+      userId: string
+    ): Promise<string | null> => {
+      const cached = nicknameToRecipientId.get(nickname);
+      if (cached) return cached;
+
+      const { data: rows } = await supabase
+        .from("recipients")
+        .select("id, canonical_recipient_id")
+        .eq("user_id", userId)
+        .eq("nickname", nickname);
+
+      if (!rows || rows.length === 0) return null;
+      const row = rows[0];
+      const resolved = (row.canonical_recipient_id as string | null) ?? row.id;
+      nicknameToRecipientId.set(nickname, resolved);
+      return resolved;
+    };
+
     for (const part of parts) {
       if (part.functionCall?.name === "save_sender_profile") {
         const args = (part.functionCall.args || {}) as Record<string, unknown>;
@@ -336,26 +363,50 @@ async function extractFromConversation(
         console.log("[EXTRACT] recipient profile:", JSON.stringify(args));
 
         if (session.userId && args.nickname) {
-          const { data: existing } = await supabase
+          const nickname = args.nickname as string;
+
+          // 同ユーザーの正本（canonical_recipient_id IS NULL）のみ取得
+          const { data: canonicalRecipients } = await supabase
             .from("recipients")
-            .select("id")
+            .select("id, nickname, relationship, age, gender, occupation, interests")
             .eq("user_id", session.userId)
-            .eq("nickname", args.nickname as string)
-            .maybeSingle();
+            .is("canonical_recipient_id", null);
 
-          const row: Record<string, unknown> = { user_id: session.userId, nickname: args.nickname };
-          if (args.relationship) row.relationship = args.relationship;
-          if (args.age) row.age = args.age;
-          if (args.gender) row.gender = args.gender;
-          if (args.occupation) row.occupation = args.occupation;
-          if (args.interests) row.interests = args.interests;
+          const candidate = {
+            nickname,
+            relationship: (args.relationship as string | undefined) ?? null,
+            age: (args.age as number | undefined) ?? null,
+            gender: (args.gender as string | undefined) ?? null,
+            occupation: (args.occupation as string | undefined) ?? null,
+          };
 
-          if (existing) {
-            const { error } = await supabase.from("recipients").update(row).eq("id", existing.id);
-            console.log("[DB] recipients update:", error ? `ERROR: ${error.message}` : "OK");
+          const decision = await findMatchingRecipient(candidate, canonicalRecipients ?? []);
+          console.log("[EXTRACT] match decision:", JSON.stringify(decision));
+
+          const fields: Record<string, unknown> = {};
+          if (args.relationship) fields.relationship = args.relationship;
+          if (args.age) fields.age = args.age;
+          if (args.gender) fields.gender = args.gender;
+          if (args.occupation) fields.occupation = args.occupation;
+          if (args.interests) fields.interests = args.interests;
+
+          if (shouldMerge(decision) && decision.matchId) {
+            // 既存の正本に情報を追記（呼び名は上書きしない）
+            if (Object.keys(fields).length > 0) {
+              const { error } = await supabase.from("recipients").update(fields).eq("id", decision.matchId);
+              console.log("[DB] recipients merge-update:", error ? `ERROR: ${error.message}` : "OK", "→", decision.matchId);
+            }
+            nicknameToRecipientId.set(nickname, decision.matchId);
           } else {
-            const { error } = await supabase.from("recipients").insert(row);
+            // 新規作成
+            const row: Record<string, unknown> = { user_id: session.userId, nickname, ...fields };
+            const { data: inserted, error } = await supabase
+              .from("recipients")
+              .insert(row)
+              .select("id")
+              .single();
             console.log("[DB] recipients insert:", error ? `ERROR: ${error.message}` : "OK", JSON.stringify(row));
+            if (inserted?.id) nicknameToRecipientId.set(nickname, inserted.id);
           }
         }
       }
@@ -374,27 +425,21 @@ async function extractFromConversation(
         console.log("[EXTRACT] recipient notes:", JSON.stringify(args));
 
         if (session.userId && args.nickname && args.notes && args.notes.length > 0) {
-          // Look up recipient by nickname + user_id
-          const { data: recipient } = await supabase
-            .from("recipients")
-            .select("id")
-            .eq("user_id", session.userId)
-            .eq("nickname", args.nickname)
-            .maybeSingle();
+          const recipientId = await resolveRecipientByNickname(args.nickname, session.userId);
 
-          if (recipient) {
+          if (recipientId) {
             // Check for duplicate notes
             const { data: existingNotes } = await supabase
               .from("recipient_notes")
               .select("content")
-              .eq("recipient_id", recipient.id)
+              .eq("recipient_id", recipientId)
               .eq("user_id", session.userId);
 
             const existingContents = new Set((existingNotes || []).map((n: { content: string }) => n.content));
             const newNotes = args.notes
               .filter(note => !existingContents.has(note))
               .map(content => ({
-                recipient_id: recipient.id,
+                recipient_id: recipientId,
                 user_id: session.userId!,
                 content,
                 source: "ai",
@@ -426,17 +471,11 @@ async function extractFromConversation(
         console.log("[EXTRACT] proposal:", JSON.stringify(args));
 
         if (session.userId && args.recipient_nickname && args.product_name) {
-          // Look up recipient by nickname + user_id
-          const { data: recipient } = await supabase
-            .from("recipients")
-            .select("id")
-            .eq("user_id", session.userId)
-            .eq("nickname", args.recipient_nickname)
-            .maybeSingle();
+          const recipientId = await resolveRecipientByNickname(args.recipient_nickname, session.userId);
 
           const row: Record<string, unknown> = {
             user_id: session.userId,
-            recipient_id: recipient?.id || null,
+            recipient_id: recipientId,
             product_name: args.product_name,
           };
           if (args.product_description) row.product_description = args.product_description;
@@ -495,7 +534,8 @@ export async function POST(request: NextRequest) {
       const { data: savedRecipients } = await supabase
         .from("recipients")
         .select("*")
-        .eq("user_id", userId);
+        .eq("user_id", userId)
+        .is("canonical_recipient_id", null);
 
       if (savedRecipients && savedRecipients.length > 0) {
         for (const r of savedRecipients) {
