@@ -264,7 +264,7 @@ export default function MyPage() {
     <div className="flex flex-col flex-1 min-h-screen">
       {/* ナビゲーション */}
       <nav className="flex justify-between items-center p-4 border-b border-border">
-        <Link href="/" className="text-xl font-bold tracking-tight">Con-TecT</Link>
+        <Link href="/" className="text-xl font-bold tracking-tight">ENN</Link>
         <div className="flex items-center gap-4">
           <Link href="/chat" className="text-sm text-muted-foreground hover:text-foreground transition-colors">チャット</Link>
           <button onClick={handleLogout} className="text-sm text-muted-foreground hover:text-foreground transition-colors">ログアウト</button>

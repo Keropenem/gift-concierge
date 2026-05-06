@@ -241,7 +241,7 @@ export default function ChatPage() {
       {/* ヘッダー */}
       <header className="flex justify-between items-center px-4 py-3 border-b border-border">
         <Link href="/" className="text-lg font-bold tracking-tight">
-          Con-TecT
+          ENN
         </Link>
         <div className="flex items-center gap-3">
           {profile && (

@@ -1,4 +1,4 @@
-// Con-TecT データベース型定義（要件定義書 Section 8 準拠）
+// ENN データベース型定義（要件定義書 Section 8 準拠）
 
 export interface Profile {
   id: string;

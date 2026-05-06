@@ -71,7 +71,7 @@ export default async function Home() {
       <main className="flex flex-col items-center gap-8 w-full max-w-2xl px-4">
         {/* ロゴ */}
         <div className="text-center">
-          <h1 className="text-4xl font-bold tracking-tight">Con-TecT</h1>
+          <h1 className="text-4xl font-bold tracking-tight">ENN</h1>
           <p className="text-sm text-muted-foreground mt-2">
             贈り物は、二人の物語から生まれる
           </p>

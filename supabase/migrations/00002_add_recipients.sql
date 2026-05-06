@@ -1,4 +1,4 @@
--- Con-TecT: recipients テーブル
+-- ENN: recipients テーブル
 -- 会議で追加された要件: 過去に贈った相手のプロフィールを保存し、再利用可能にする
 
 create table if not exists public.recipients (

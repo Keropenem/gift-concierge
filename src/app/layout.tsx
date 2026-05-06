@@ -9,7 +9,7 @@ const notoSansJP = Noto_Sans_JP({
 });
 
 export const metadata: Metadata = {
-  title: "Con-TecT | 二人の物語から生まれる贈り物",
+  title: "ENN | 二人の物語から生まれる贈り物",
   description:
     "贈り手と受け取り手の人生の文脈から「見えない共通点」を見出し、唯一無二のプレゼントを提案するギフトECサービス",
 };

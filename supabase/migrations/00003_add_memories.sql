@@ -1,4 +1,4 @@
--- Con-TecT: memories テーブル
+-- ENN: memories テーブル
 -- AIとの対話から蓄積される自由形式のメモ（ChatGPTのメモリ機能相当）
 
 create table if not exists public.memories (
