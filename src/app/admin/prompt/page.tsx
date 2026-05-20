@@ -4,13 +4,23 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 
+type HistoryEntry = {
+  id: string;
+  prompt: string;
+  memo: string | null;
+  created_at: string;
+};
+
 export default function PromptEditorPage() {
   const [prompt, setPrompt] = useState("");
+  const [memo, setMemo] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [authenticated, setAuthenticated] = useState(false);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
     loadPrompt();
@@ -40,7 +50,19 @@ export default function PromptEditorPage() {
       setPrompt(data.prompt);
     }
 
+    await loadHistory();
     setLoading(false);
+  }
+
+  async function loadHistory() {
+    const supabase = createClient();
+    const { data } = await supabase
+      .from("prompt_history")
+      .select("id, prompt, memo, created_at")
+      .order("created_at", { ascending: false })
+      .limit(30);
+
+    if (data) setHistory(data as HistoryEntry[]);
   }
 
   async function handleSave() {
@@ -58,12 +80,33 @@ export default function PromptEditorPage() {
 
     if (updateError) {
       setError("保存に失敗しました: " + updateError.message);
-    } else {
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
+      setSaving(false);
+      return;
     }
 
+    // 履歴に追加
+    const { error: historyError } = await supabase.from("prompt_history").insert({
+      prompt,
+      memo: memo.trim() || null,
+      updated_by: user?.id,
+    });
+
+    if (historyError) {
+      console.error("[PROMPT] history insert failed:", historyError.message);
+    } else {
+      setMemo("");
+      await loadHistory();
+    }
+
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
     setSaving(false);
+  }
+
+  function handleRestore(entry: HistoryEntry) {
+    if (!confirm("この履歴の内容をエディタに復元しますか？（保存はされません）")) return;
+    setPrompt(entry.prompt);
+    setExpandedId(null);
   }
 
   async function handleReset() {
@@ -199,13 +242,26 @@ Step 1〜3の情報から、二人の「見えない共通点」と背景にあ�
           placeholder="プロンプトを入力..."
         />
 
+        {/* 変更メモ（履歴に残る） */}
+        <div className="mt-4">
+          <label className="block text-sm font-medium mb-1">
+            変更メモ（任意） — 何を狙った変更か、どんな挙動を期待したかを残しておくと履歴で振り返れます
+          </label>
+          <input
+            value={memo}
+            onChange={(e) => setMemo(e.target.value)}
+            placeholder="例: Step 3の質問を1つにまとめてユーザー負担を減らす"
+            className="w-full px-3 py-2 text-sm border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring/20"
+          />
+        </div>
+
         <div className="flex gap-3 mt-4">
           <button
             onClick={handleSave}
             disabled={saving}
             className="px-6 py-2.5 bg-primary text-primary-foreground rounded-md hover:opacity-90 transition-opacity disabled:opacity-50"
           >
-            {saving ? "保存中..." : "保存"}
+            {saving ? "保存中..." : "保存（履歴にも残す）"}
           </button>
           <button
             onClick={handleReset}
@@ -215,8 +271,63 @@ Step 1〜3の情報から、二人の「見えない共通点」と背景にあ�
           </button>
         </div>
 
-        <div className="mt-6 text-xs text-muted-foreground">
+        <div className="mt-2 text-xs text-muted-foreground">
           <p>文字数: {prompt.length}</p>
+        </div>
+
+        {/* 変更履歴一覧 */}
+        <div className="mt-10">
+          <h3 className="text-lg font-semibold mb-3">変更履歴</h3>
+          {history.length === 0 ? (
+            <p className="text-sm text-muted-foreground">まだ履歴がありません。</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {history.map((entry) => {
+                const isExpanded = expandedId === entry.id;
+                return (
+                  <div
+                    key={entry.id}
+                    className="border border-border rounded-md p-3 text-sm"
+                  >
+                    <div className="flex justify-between items-start gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs text-muted-foreground">
+                          {new Date(entry.created_at).toLocaleString("ja-JP")}
+                        </div>
+                        {entry.memo && (
+                          <div className="mt-1 text-foreground">{entry.memo}</div>
+                        )}
+                        {!entry.memo && (
+                          <div className="mt-1 text-muted-foreground italic">
+                            （メモなし）
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex gap-2 shrink-0">
+                        <button
+                          onClick={() => setExpandedId(isExpanded ? null : entry.id)}
+                          className="text-xs text-muted-foreground hover:underline"
+                        >
+                          {isExpanded ? "閉じる" : "本文を表示"}
+                        </button>
+                        <button
+                          onClick={() => handleRestore(entry)}
+                          className="text-xs text-muted-foreground hover:underline"
+                        >
+                          エディタに復元
+                        </button>
+                      </div>
+                    </div>
+                    {isExpanded && (
+                      <pre className="mt-3 p-3 bg-muted rounded text-xs font-mono whitespace-pre-wrap max-h-96 overflow-y-auto">
+                        {entry.prompt}
+                      </pre>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </main>
     </div>
