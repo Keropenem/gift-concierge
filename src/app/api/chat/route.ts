@@ -621,7 +621,8 @@ export async function POST(request: NextRequest) {
       id: sessionId,
       history: [{ role: "user", parts: [{ text: firstMessage }] }],
       userId: userId || null,
-      senderData: { ...(profile || {}), _preview: message },
+      // _originalMessage: 履歴復元時に表示する純粋なユーザー入力（systemコンテキスト混入を防ぐ）
+      senderData: { ...(profile || {}), _preview: message, _originalMessage: message },
       recipientData: recipient || {},
     };
   } else {
