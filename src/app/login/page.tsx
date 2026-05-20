@@ -86,6 +86,15 @@ export default function LoginPage() {
             {loading ? "ログイン中..." : "ログイン"}
           </button>
 
+          <div className="text-center">
+            <Link
+              href="/auth/forgot-password"
+              className="text-sm text-muted-foreground hover:underline"
+            >
+              パスワードを忘れた方
+            </Link>
+          </div>
+
           <p className="text-center text-sm text-muted-foreground">
             アカウントをお持ちでないですか？{" "}
             <Link href="/signup" className="text-foreground hover:underline">
