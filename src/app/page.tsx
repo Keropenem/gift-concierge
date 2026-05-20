@@ -110,6 +110,29 @@ export default async function Home() {
           </div>
         </form>
 
+        {/* 入口ボタン（白紙UIへの導線、フィードバック #14） */}
+        <div className="flex flex-col sm:flex-row gap-3 w-full">
+          <Link
+            href="/chat?q=ギフトについて相談したい"
+            className="flex-1 px-5 py-3 text-center text-sm border border-border rounded-lg hover:bg-muted transition-colors"
+          >
+            🎁 ギフトについて相談する
+          </Link>
+          <Link
+            href="/chat?q=自分が欲しいものを相談したい"
+            className="flex-1 px-5 py-3 text-center text-sm border border-border rounded-lg hover:bg-muted transition-colors"
+          >
+            ✨ 自分が欲しい物を相談する
+          </Link>
+        </div>
+
+        {/* モード切替（フィードバック #11 のフォーム式UI、A/Bテスト用） */}
+        <div className="text-center text-xs text-muted-foreground">
+          <Link href="/chat/form" className="hover:underline">
+            まとめてフォームで入力する →
+          </Link>
+        </div>
+
         {/* 過去の相談一覧 */}
         {sessions.length > 0 && (
           <div className="w-full mt-4">
