@@ -42,3 +42,7 @@ next-env.d.ts
 __pycache__/
 *.pyc
 .venv/
+
+# feedback作業用バイナリ・抽出物（OneDrive管理）
+docs/feedback/*.xlsx
+docs/feedback/extracted_images/
