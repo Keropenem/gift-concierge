@@ -316,7 +316,7 @@ export default function ChatPage() {
     }
   }
 
-  async function sendMessage(text: string) {
+  async function sendMessage(text: string, overrideRecipient?: Recipient) {
     if (!text.trim() || loading) return;
 
     const userMessage: ChatMessage = {
@@ -339,12 +339,14 @@ export default function ChatPage() {
         const p = profile || profileRef.current;
         const uid = userId || userIdRef.current;
         const mem = userMemories.length > 0 ? userMemories : userMemoriesRef.current;
+        // overrideRecipient: ピッカークリック直後など setState 反映前でも確実に渡せるよう引数で受ける
+        const r = overrideRecipient || selectedRecipient;
         console.log("[DEBUG sendMessage] profile:", JSON.stringify(p));
         console.log("[DEBUG sendMessage] userId:", uid);
         console.log("[DEBUG sendMessage] memories:", mem.length);
-        console.log("[DEBUG sendMessage] selectedRecipient:", JSON.stringify(selectedRecipient));
+        console.log("[DEBUG sendMessage] recipient:", JSON.stringify(r));
         if (p) body.profile = p;
-        if (selectedRecipient) body.recipient = selectedRecipient;
+        if (r) body.recipient = r;
         if (uid) body.userId = uid;
         if (mem.length > 0) body.memories = mem;
         console.log("[DEBUG sendMessage] body keys being sent:", Object.keys(body));
@@ -558,24 +560,26 @@ export default function ChatPage() {
                 </div>
               )}
 
-              {/* 受取り手選択 */}
+              {/* 受取り手選択 — クリックで即チャット開始（フィードバック：相手選択で画面遷移） */}
               {showRecipientPicker && recipients.length > 0 && (
                 <div className="mt-4 max-w-md mx-auto">
                   <p className="text-sm font-medium text-foreground mb-3">
-                    過去に贈った相手を選ぶ
+                    {intent === "self"
+                      ? "（参考）過去に登録した相手"
+                      : "過去に贈った相手を選ぶ"}
                   </p>
                   <div className="flex flex-col gap-2">
                     {recipients.map((r) => (
                       <button
                         key={r.id}
-                        onClick={() => setSelectedRecipient(
-                          selectedRecipient?.id === r.id ? null : r
-                        )}
-                        className={`p-3 rounded-lg text-left text-sm border transition-colors ${
-                          selectedRecipient?.id === r.id
-                            ? "border-primary bg-primary/5"
-                            : "border-border hover:border-primary/50"
-                        }`}
+                        onClick={() => {
+                          setSelectedRecipient(r);
+                          const label = r.relationship
+                            ? `${r.nickname}（${r.relationship}）`
+                            : r.nickname;
+                          sendMessage(`${label}への贈り物を考えています。`, r);
+                        }}
+                        className="p-3 rounded-lg text-left text-sm border border-border hover:border-primary/50 hover:bg-muted/40 transition-colors"
                       >
                         <span className="font-medium">{r.nickname}</span>
                         {r.relationship && (
@@ -600,11 +604,6 @@ export default function ChatPage() {
                       + 新しい相手に贈る
                     </button>
                   </div>
-                  {selectedRecipient && (
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      {selectedRecipient.nickname}さんの情報が自動反映されます
-                    </p>
-                  )}
                 </div>
               )}
             </div>
