@@ -6,6 +6,175 @@ import ReactMarkdown from "react-markdown";
 import { createClient } from "@/lib/supabase/client";
 import type { ChatMessage, Profile, Recipient, Memory } from "@/lib/types";
 
+type Rating = "good" | "neutral" | "bad";
+type FeedbackRecord = { rating: Rating; comment: string | null };
+
+// 提案へのフィードバックUI（フィードバック #4: 3段階リアクション+任意コメント）
+function FeedbackWidget({
+  sessionId,
+  messageIndex,
+  initial,
+}: {
+  sessionId: string;
+  messageIndex: number;
+  initial?: FeedbackRecord;
+}) {
+  const [rating, setRating] = useState<Rating | null>(initial?.rating ?? null);
+  const [comment, setComment] = useState(initial?.comment ?? "");
+  const [showComment, setShowComment] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  async function submit(nextRating: Rating, nextComment: string) {
+    setSaving(true);
+    try {
+      await fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          message_index: messageIndex,
+          rating: nextRating,
+          comment: nextComment.trim() || null,
+        }),
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleRate(r: Rating) {
+    setRating(r);
+    submit(r, comment);
+  }
+
+  function handleCommentSave() {
+    if (!rating) return;
+    submit(rating, comment);
+    setShowComment(false);
+  }
+
+  const options: Array<{ value: Rating; emoji: string; label: string }> = [
+    { value: "good", emoji: "😊", label: "ニコニコ" },
+    { value: "neutral", emoji: "😐", label: "普通" },
+    { value: "bad", emoji: "😞", label: "ダメ" },
+  ];
+
+  return (
+    <div className="mt-2 flex flex-col gap-2 text-xs">
+      <div className="flex items-center gap-2">
+        <span className="text-muted-foreground">この提案は？</span>
+        {options.map((opt) => (
+          <button
+            key={opt.value}
+            onClick={() => handleRate(opt.value)}
+            disabled={saving}
+            className={`px-2 py-1 rounded-md border transition-colors ${
+              rating === opt.value
+                ? "border-primary bg-primary/10"
+                : "border-border hover:bg-muted"
+            }`}
+            aria-label={opt.label}
+            title={opt.label}
+          >
+            {opt.emoji}
+          </button>
+        ))}
+        {rating && (
+          <button
+            onClick={() => setShowComment((v) => !v)}
+            className="text-muted-foreground hover:underline ml-1"
+          >
+            {showComment ? "閉じる" : comment ? "コメント編集" : "コメント追加（任意）"}
+          </button>
+        )}
+        {saved && <span className="text-green-600 ml-1">保存しました</span>}
+      </div>
+      {showComment && rating && (
+        <div className="flex gap-2 items-start">
+          <textarea
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder="気になった点や好きだった点など（任意）"
+            rows={2}
+            className="flex-1 px-2 py-1 text-xs border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring/20 resize-y"
+          />
+          <button
+            onClick={handleCommentSave}
+            disabled={saving}
+            className="px-3 py-1 text-xs bg-primary text-primary-foreground rounded-md hover:opacity-90 transition-opacity disabled:opacity-50"
+          >
+            保存
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 提案を含むassistantメッセージかを判定
+function isProposalMessage(content: string): boolean {
+  return /(Step\s*6|商品名|購入可能なURL|## Step 6|おすすめ.*：|提案します)/i.test(content);
+}
+
+// Step 1-7 プログレス表示（assistantメッセージ往復数から大まかなStepを推定）
+// Step 1-3はヒアリング（1往復ずつ）、Step 4-7は最終提案で一括出力されることが多い
+function StepProgress({ messages }: { messages: ChatMessage[] }) {
+  const assistantTurns = messages.filter((m) => m.role === "assistant").length;
+  // 最後のassistantメッセージに「Step 6」や「商品名」「購入可能なURL」が含まれていたら最終提案到達と判定
+  const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+  const reachedFinal =
+    !!lastAssistant &&
+    /(Step\s*[4-7]|商品名|購入可能なURL|## Step 4|## Step 5|## Step 6|## Step 7)/i.test(
+      lastAssistant.content
+    );
+
+  let current = Math.min(assistantTurns, 3); // 1往復目=Step1完了, 2往復目=Step2完了, 3往復目=Step3完了
+  if (reachedFinal) current = 7;
+
+  const labels = [
+    "あなた",
+    "相手",
+    "関係性",
+    "分析",
+    "物語",
+    "提案",
+    "演出",
+  ];
+
+  return (
+    <div className="flex items-center gap-1">
+      {labels.map((label, i) => {
+        const step = i + 1;
+        const isDone = current >= step;
+        const isCurrent = current + 1 === step && current < 7;
+        return (
+          <div key={step} className="flex-1 flex flex-col items-center gap-1">
+            <div
+              className={`w-full h-1 rounded-full transition-colors ${
+                isDone
+                  ? "bg-primary"
+                  : isCurrent
+                  ? "bg-primary/40"
+                  : "bg-muted"
+              }`}
+            />
+            <span
+              className={`text-[10px] leading-tight ${
+                isDone || isCurrent ? "text-foreground" : "text-muted-foreground"
+              }`}
+            >
+              {step}.{label}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function ChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -20,6 +189,8 @@ export default function ChatPage() {
   const [initialized, setInitialized] = useState(false);
   const [pastSessions, setPastSessions] = useState<Array<{ id: string; created_at: string; preview: string; messageCount: number }>>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
+  const [feedbackMap, setFeedbackMap] = useState<Map<number, FeedbackRecord>>(new Map());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -35,6 +206,30 @@ export default function ChatPage() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // タッチデバイス判定（SPでは Enter=改行、送信ボタンで送信）
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setIsTouchDevice(window.matchMedia("(pointer: coarse)").matches);
+    }
+  }, []);
+
+  // セッション確定時にフィードバックをロード
+  useEffect(() => {
+    if (!sessionId) {
+      setFeedbackMap(new Map());
+      return;
+    }
+    (async () => {
+      const res = await fetch(`/api/feedback?session_id=${sessionId}`);
+      const data = await res.json();
+      const m = new Map<number, FeedbackRecord>();
+      for (const f of data.feedback || []) {
+        m.set(f.message_index, { rating: f.rating, comment: f.comment });
+      }
+      setFeedbackMap(m);
+    })();
+  }, [sessionId]);
 
   async function loadUserData() {
     const supabase = createClient();
@@ -188,11 +383,13 @@ export default function ChatPage() {
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+      // SP（タッチデバイス）: Enter は常に改行。送信は送信ボタンタップ
+      if (isTouchDevice) return;
       if (e.shiftKey) {
         // Shift+Enter = 改行（デフォルト動作のまま）
         return;
       }
-      // Enter = 送信（IME変換中でなければ）
+      // PC: Enter = 送信（IME変換中でなければ）
       e.preventDefault();
       sendMessage(input);
     }
@@ -271,6 +468,15 @@ export default function ChatPage() {
           </button>
         </div>
       </header>
+
+      {/* Step 1-7 プログレス（フィードバック #16: 工数の見える化） */}
+      {messages.length > 0 && (
+        <div className="border-b border-border px-4 py-2">
+          <div className="max-w-2xl mx-auto">
+            <StepProgress messages={messages} />
+          </div>
+        </div>
+      )}
 
       {/* 履歴パネル */}
       {showHistory && (
@@ -378,40 +584,55 @@ export default function ChatPage() {
             </div>
           )}
 
-          {messages.map((msg, i) => (
-            <div
-              key={i}
-              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-            >
+          {messages.map((msg, i) => {
+            const showFeedback =
+              msg.role === "assistant" &&
+              sessionId !== null &&
+              isProposalMessage(msg.content);
+            return (
               <div
-                className={`max-w-[80%] px-4 py-3 rounded-2xl text-sm leading-relaxed ${
-                  msg.role === "user"
-                    ? "bg-primary text-primary-foreground whitespace-pre-wrap"
-                    : "bg-muted text-foreground prose prose-sm prose-neutral max-w-none [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5 [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-1"
-                }`}
+                key={i}
+                className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}
               >
-                {msg.role === "user" ? (
-                  msg.content
-                ) : (
-                  <ReactMarkdown
-                    components={{
-                      a: ({ href, children, ...props }) => (
-                        <a
-                          href={href}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-sky-600 underline underline-offset-2 hover:text-sky-700"
-                          {...props}
-                        >
-                          {children}
-                        </a>
-                      ),
-                    }}
-                  >{msg.content}</ReactMarkdown>
+                <div
+                  className={`max-w-[80%] px-4 py-3 rounded-2xl text-sm leading-relaxed ${
+                    msg.role === "user"
+                      ? "bg-primary text-primary-foreground whitespace-pre-wrap"
+                      : "bg-muted text-foreground prose prose-sm prose-neutral max-w-none [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5 [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-1"
+                  }`}
+                >
+                  {msg.role === "user" ? (
+                    msg.content
+                  ) : (
+                    <ReactMarkdown
+                      components={{
+                        a: ({ href, children, ...props }) => (
+                          <a
+                            href={href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-sky-600 underline underline-offset-2 hover:text-sky-700"
+                            {...props}
+                          >
+                            {children}
+                          </a>
+                        ),
+                      }}
+                    >{msg.content}</ReactMarkdown>
+                  )}
+                </div>
+                {showFeedback && sessionId && (
+                  <div className="max-w-[80%] w-full">
+                    <FeedbackWidget
+                      sessionId={sessionId}
+                      messageIndex={i}
+                      initial={feedbackMap.get(i)}
+                    />
+                  </div>
                 )}
               </div>
-            </div>
-          ))}
+            );
+          })}
 
           {loading && (
             <div className="flex justify-start">
@@ -443,10 +664,10 @@ export default function ChatPage() {
               autoResize();
             }}
             onKeyDown={handleKeyDown}
-            placeholder="メッセージを入力...（Shift+Enterで改行）"
+            placeholder={isTouchDevice ? "メッセージを入力..." : "メッセージを入力...（Shift+Enterで改行）"}
             disabled={loading}
             rows={1}
-            className="flex-1 px-4 py-2.5 border border-input rounded-2xl focus:outline-none focus:ring-2 focus:ring-ring/20 disabled:opacity-50 resize-none overflow-hidden leading-relaxed"
+            className="flex-1 px-4 py-2.5 border border-input rounded-2xl focus:outline-none focus:ring-2 focus:ring-ring/20 disabled:opacity-50 resize-none overflow-y-auto max-h-[200px] leading-relaxed"
             autoFocus
           />
           <button
