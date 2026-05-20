@@ -64,14 +64,14 @@ function FeedbackWidget({
 
   return (
     <div className="mt-2 flex flex-col gap-2 text-xs">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <span className="text-muted-foreground">この提案は？</span>
         {options.map((opt) => (
           <button
             key={opt.value}
             onClick={() => handleRate(opt.value)}
             disabled={saving}
-            className={`px-2 py-1 rounded-md border transition-colors ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md border transition-colors ${
               rating === opt.value
                 ? "border-primary bg-primary/10"
                 : "border-border hover:bg-muted"
@@ -79,7 +79,8 @@ function FeedbackWidget({
             aria-label={opt.label}
             title={opt.label}
           >
-            {opt.emoji}
+            <span className="text-2xl leading-none">{opt.emoji}</span>
+            <span className="text-xs text-muted-foreground">{opt.label}</span>
           </button>
         ))}
         {rating && (
