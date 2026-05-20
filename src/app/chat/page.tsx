@@ -191,6 +191,7 @@ export default function ChatPage() {
   const [showHistory, setShowHistory] = useState(false);
   const [isTouchDevice, setIsTouchDevice] = useState(false);
   const [feedbackMap, setFeedbackMap] = useState<Map<number, FeedbackRecord>>(new Map());
+  const [intent, setIntent] = useState<"gift" | "self" | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -300,6 +301,12 @@ export default function ChatPage() {
       await resumeSession(resumeId);
       setInitialized(true);
       return;
+    }
+
+    // 入口ボタン経由（フィードバック #14）: 即送信せず、受け手ピッカー＋ヒント表示で待機
+    const intentParam = params.get("intent");
+    if (intentParam === "gift" || intentParam === "self") {
+      setIntent(intentParam);
     }
 
     const initialQuery = params.get("q");
@@ -506,11 +513,29 @@ export default function ChatPage() {
         <div className="max-w-2xl mx-auto flex flex-col gap-4">
           {messages.length === 0 && (
             <div className="text-center text-muted-foreground py-12">
-              <p className="text-lg font-medium">ギフトコンシェルジュ</p>
+              <p className="text-lg font-medium">
+                {intent === "self" ? "自分のための一品を探す" : "ギフトコンシェルジュ"}
+              </p>
               <p className="text-sm mt-2">
-                あなたと大切な方の「見えない共通点」から、
-                <br />
-                世界にひとつだけの贈り物を提案します。
+                {intent === "gift" ? (
+                  <>
+                    贈りたい相手を選ぶか、
+                    <br />
+                    下のメッセージ欄に書いて相談を始めてください。
+                  </>
+                ) : intent === "self" ? (
+                  <>
+                    どんな物が欲しいか、気分や状況など、
+                    <br />
+                    下のメッセージ欄に自由に書いてください。
+                  </>
+                ) : (
+                  <>
+                    あなたと大切な方の「見えない共通点」から、
+                    <br />
+                    世界にひとつだけの贈り物を提案します。
+                  </>
+                )}
               </p>
 
               {/* 会員プロフィール表示 */}

@@ -111,15 +111,17 @@ export default async function Home() {
         </form>
 
         {/* 入口ボタン（白紙UIへの導線、フィードバック #14） */}
+        {/* 注: ?q= で即送信すると受け手ピッカーや受け手マッチング機会を奪うので、
+           intent フラグだけ渡して chat 側で「相手選択UI」を表示する */}
         <div className="flex flex-col sm:flex-row gap-3 w-full">
           <Link
-            href="/chat?q=ギフトについて相談したい"
+            href="/chat?intent=gift"
             className="flex-1 px-5 py-3 text-center text-sm border border-border rounded-lg hover:bg-muted transition-colors"
           >
             🎁 ギフトについて相談する
           </Link>
           <Link
-            href="/chat?q=自分が欲しいものを相談したい"
+            href="/chat?intent=self"
             className="flex-1 px-5 py-3 text-center text-sm border border-border rounded-lg hover:bg-muted transition-colors"
           >
             ✨ 自分が欲しい物を相談する
